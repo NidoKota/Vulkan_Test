@@ -1,0 +1,10 @@
+^C:\USERS\NIDOK\DESKTOP\VULKAN_TEST\BUILD\CMAKEFILES\CB7D844408D9B6F6E7F6FF012DC97922\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/nidok/Desktop/Vulkan_Test -BC:/Users/nidok/Desktop/Vulkan_Test/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/nidok/Desktop/Vulkan_Test/build/Vulkan_Test.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

@@ -1,0 +1,3 @@
+C:/Users/nidok/Desktop/Vulkan_Test/build/CMakeFiles/app.dir
+C:/Users/nidok/Desktop/Vulkan_Test/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/nidok/Desktop/Vulkan_Test/build/CMakeFiles/ZERO_CHECK.dir
