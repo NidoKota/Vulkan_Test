@@ -81,9 +81,46 @@ int main()
     devCreateInfo.pQueueCreateInfos = queueCreateInfo;
     devCreateInfo.queueCreateInfoCount = 1;
 
-    vk::UniqueDevice device = physicalDevice.createDeviceUnique(devCreateInfo);
+    vk::UniqueDevice devicePtr = physicalDevice.createDeviceUnique(devCreateInfo);
+    vk::Device device = devicePtr.get();
 
-    vk::Queue graphicsQueue = device->getQueue(graphicsQueueFamilyIndex, 0);
+    vk::Queue graphicsQueue = device.getQueue(graphicsQueueFamilyIndex, 0);
+
+
+    vk::CommandPoolCreateInfo cmdPoolCreateInfo;
+    cmdPoolCreateInfo.queueFamilyIndex = graphicsQueueFamilyIndex;
+
+    vk::UniqueCommandPool cmdPool = device.createCommandPoolUnique(cmdPoolCreateInfo);
+
+
+
+    vk::CommandPoolCreateInfo cmdPoolCreateInfo;
+    cmdPoolCreateInfo.queueFamilyIndex = graphicsQueueFamilyIndex;
+
+    vk::UniqueCommandPool cmdPool = device.createCommandPoolUnique(cmdPoolCreateInfo);
+    
+    vk::CommandBufferAllocateInfo cmdBufAllocInfo;
+    cmdBufAllocInfo.commandPool = cmdPool.get();
+    cmdBufAllocInfo.commandBufferCount = 1;
+    cmdBufAllocInfo.level = vk::CommandBufferLevel::ePrimary;
+
+    std::vector<vk::UniqueCommandBuffer> cmdBufs = device.allocateCommandBuffersUnique(cmdBufAllocInfo);
+
+    vk::CommandBufferBeginInfo cmdBeginInfo;
+    cmdBufs[0]->begin(cmdBeginInfo);
+
+    // コマンドを記録
+
+    cmdBufs[0]->end();
+
+    vk::CommandBuffer submitCmdBuf[1] = { cmdBufs[0].get() };
+    vk::SubmitInfo submitInfo;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = submitCmdBuf;
+
+    graphicsQueue.submit({ submitInfo }, nullptr);
+
+    graphicsQueue.waitIdle();
 
     return EXIT_SUCCESS;
 }
