@@ -74,6 +74,7 @@ int main()
     queueCreateInfo[0].pQueuePriorities = queuePriorities;
     queueCreateInfo[0].queueCount = 1;
 
+    // 論理デバイス
     vk::DeviceCreateInfo devCreateInfo;
     devCreateInfo.enabledLayerCount = std::size(requiredLayers);
     devCreateInfo.ppEnabledLayerNames = requiredLayers;
@@ -86,13 +87,25 @@ int main()
 
     vk::Queue graphicsQueue = device.getQueue(graphicsQueueFamilyIndex, 0);
 
+    //
+    const uint32_t screenWidth = 640;
+    const uint32_t screenHeight = 480;
 
-    vk::CommandPoolCreateInfo cmdPoolCreateInfo;
-    cmdPoolCreateInfo.queueFamilyIndex = graphicsQueueFamilyIndex;
+    vk::ImageCreateInfo imgCreateInfo;
+    imgCreateInfo.imageType = vk::ImageType::e2D;
+    imgCreateInfo.extent = vk::Extent3D(screenWidth, screenHeight, 1);
+    imgCreateInfo.mipLevels = 1;
+    imgCreateInfo.arrayLayers = 1;
+    imgCreateInfo.format = vk::Format::eR8G8B8A8Unorm;
+    imgCreateInfo.tiling = vk::ImageTiling::eLinear;
+    imgCreateInfo.initialLayout = vk::ImageLayout::eUndefined;
+    imgCreateInfo.usage = vk::ImageUsageFlagBits::eColorAttachment;
+    imgCreateInfo.sharingMode = vk::SharingMode::eExclusive;
+    imgCreateInfo.samples = vk::SampleCountFlagBits::e1;
 
-    vk::UniqueCommandPool cmdPool = device.createCommandPoolUnique(cmdPoolCreateInfo);
-
-
+    vk::UniqueImage image = device.createImageUnique(imgCreateInfo);
+    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
+    //
 
     vk::CommandPoolCreateInfo cmdPoolCreateInfo;
     cmdPoolCreateInfo.queueFamilyIndex = graphicsQueueFamilyIndex;
@@ -105,6 +118,7 @@ int main()
     cmdBufAllocInfo.level = vk::CommandBufferLevel::ePrimary;
 
     std::vector<vk::UniqueCommandBuffer> cmdBufs = device.allocateCommandBuffersUnique(cmdBufAllocInfo);
+    vk::MemoryRequirements imgMemReq = device.getImageMemoryRequirements(image.get());
 
     vk::CommandBufferBeginInfo cmdBeginInfo;
     cmdBufs[0]->begin(cmdBeginInfo);
