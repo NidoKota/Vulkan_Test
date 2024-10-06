@@ -68,16 +68,17 @@ int main()
         return EXIT_FAILURE;
     }
 
-    // Vulkanにおけるキューとは、GPUの実行するコマンドを保持する待ち行列
-    // GPUのやることリスト
+    // Vulkanにおけるキューとは、GPUの実行するコマンドを保持する待ち行列 = GPUのやることリスト
     // GPUにコマンドを送るときは、このキューにコマンドを詰め込むことになる
-    // ところで、1つのGPUが持っているキューは1つだけとは限らない
-    // いくつも持っている場合がある
-    // また、それらキューによってサポートしている機能とサポートしていない機能がある
+    // 
+    // 1つのGPUが持っているキューは1つだけとは限らない
+    // キューによってサポートしている機能とサポートしていない機能がある
     // キューにコマンドを送るときは、そのキューが何の機能をサポートしているかを事前に把握しておく必要がある
-    // ある物理デバイスの持っているキューの情報は getQueueFamilyProperties メソッドで取得できます。
-    // メソッド名にある「キューファミリ」というのは、同じ能力を持っているキューをひとまとめにしたものです。
-    // 1つの物理デバイスには1個以上のキューファミリがあり、1つのキューファミリには1個以上の同等の機能を持ったキューが所属しています。
+    // 
+    // ある物理デバイスの持っているキューの情報は getQueueFamilyProperties メソッドで取得できる
+    // メソッド名にある「キューファミリ」というのは、同じ能力を持っているキューをひとまとめにしたもの
+    // 1つの物理デバイスには1個以上のキューファミリがあり、1つのキューファミリには1個以上の同等の機能を持ったキューが所属している
+    // 1つのキューファミリの情報は vk::QueueFamilyProperties 構造体で表される
     std::vector<vk::QueueFamilyProperties> queueProps = physicalDevice.getQueueFamilyProperties();
     LOG("----------------------------------------");
     LOG("queue family count: " << queueProps.size());
@@ -91,18 +92,32 @@ int main()
         LOG("transfer support: " << (queueProps[i].queueFlags & vk::QueueFlagBits::eTransfer ? "True" : "False"));
     }
 
-    float queuePriorities[1] = {1.0f};
+    // Vulkanでは論理デバイスからキューを取得するとき、論理デバイスにあらかじめ「このキューを使うよ」ということを伝えておく必要がある
+    // 論理デバイスの作成時、vk::DeviceCreateInfo構造体に「この論理デバイスを通じてこのキューファミリからいくつのキューを使う」という情報を指定する必要がある
+    // その情報は vk::DeviceQueueCreateInfo 構造体の配列で表される
+    // 
+    // 今のところ欲しいキューは1つだけなので要素数1の配列にする
+    // queueFamilyIndex はキューの欲しいキューファミリのインデックスを表し、 
+    // queueCount はそのキューファミリからいくつのキューが欲しいかを表す
+    // 今欲しいのはグラフィック機能をサポートするキューを1つだけ
+    // pQueuePriorities はキューのタスク実行の優先度を表すfloat値配列を指定
+    // 優先度の値はキューごとに決められるため、この配列はそのキューファミリから欲しいキューの数だけの要素数を持ち
+    float queuePriorities[1] = { 1.0f };
     vk::DeviceQueueCreateInfo queueCreateInfo[1];
     queueCreateInfo[0].queueFamilyIndex = graphicsQueueFamilyIndex;
     queueCreateInfo[0].pQueuePriorities = queuePriorities;
-    queueCreateInfo[0].queueCount = 1;
+    queueCreateInfo[0].queueCount = std::size(queueCreateInfo);
 
+    // GPUが複数あるなら頼む相手をまず選ぶ
+    // ここで言う「選ぶ」とは、特定のGPUを完全に占有してしまうとかそういう話ではない
     // 物理デバイスを選んだら次は論理デバイスを作成する
     // VulkanにおいてGPUの能力を使うような機能は、全てこの論理デバイスを通して利用する
     // GPUの能力を使う際、物理デバイスを直接いじることは出来ない
+    // 
     // コンピュータの仕組みについて多少知識のある人であれば、
     // この「物理」「論理」の区別はメモリアドレスの「物理アドレス」「論理アドレス」と同じ話であることが想像できる
     // マルチタスクOS上で、1つのプロセスが特定のGPU(=物理デバイス)を独占して管理するような状態はよろしくない
+    // 
     // 仮想化されたデバイスが論理デバイス
     // これならあるプロセスが他のプロセスの存在を意識することなくGPUの能力を使うことができる
     
@@ -111,22 +126,21 @@ int main()
     vk::DeviceCreateInfo devCreateInfo;
     devCreateInfo.enabledLayerCount = std::size(requiredLayers);
     devCreateInfo.ppEnabledLayerNames = requiredLayers;
-
     devCreateInfo.pQueueCreateInfos = queueCreateInfo;
-    devCreateInfo.queueCreateInfoCount = 1;
+    devCreateInfo.queueCreateInfoCount = std::size(queueCreateInfo);
 
-    // なお、ここで言う「選ぶ」とは、特定のGPUを完全に占有してしまうとかそういう話ではない
-    // ちなみにvk::Instanceにはそれに対応するvk::UniqueInstanceが存在しましたが、
+    // vk::Instanceにはそれに対応するvk::UniqueInstanceが存在しましたが、
     // vk::PhysicalDeviceに対応するvk::UniquePhysicalDevice は存在しない
     // destroyなどを呼ぶ必要もない
     // vk::PhysicalDeviceは単に物理的なデバイスの情報を表しているに過ぎないので、構築したり破棄したりする必要がある類のオブジェクトではない
     vk::UniqueDevice devicePtr = physicalDevice.createDeviceUnique(devCreateInfo);
     vk::Device device = devicePtr.get();
 
-
+    // キューは論理デバイス(vk::Device)の getQueue メソッドで取得できる
+    // 第1引数がキューファミリのインデックス、第2引数が取得したいキューのキューファミリ内でのインデックス
     vk::Queue graphicsQueue = device.getQueue(graphicsQueueFamilyIndex, 0);
 
-    //
+    // 
     const uint32_t screenWidth = 640;
     const uint32_t screenHeight = 480;
 
