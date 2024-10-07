@@ -110,6 +110,7 @@ int main()
 
     // GPUが複数あるなら頼む相手をまず選ぶ
     // ここで言う「選ぶ」とは、特定のGPUを完全に占有してしまうとかそういう話ではない
+    // 
     // 物理デバイスを選んだら次は論理デバイスを作成する
     // VulkanにおいてGPUの能力を使うような機能は、全てこの論理デバイスを通して利用する
     // GPUの能力を使う際、物理デバイスを直接いじることは出来ない
@@ -158,18 +159,29 @@ int main()
 
     vk::UniqueImage image = device.createImageUnique(imgCreateInfo);
     vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
-    //
 
+    // コマンドバッファを作るには、その前段階として「コマンドプール」というまた別のオブジェクトを作る必要がある
+    // コマンドバッファをコマンドの記録に使うオブジェクトとすれば、コマンドプールというのはコマンドを記録するためのメモリ実体
+    // コマンドバッファを作る際には必ず必要
+    // コマンドプールは論理デバイス(vk::Device)の createCommandPool メソッド、コマンドバッファは論理デバイス(vk::Device)の allocateCommandBuffers メソッドで作成することができる
+    // コマンドプールの作成が「create」なのに対し、コマンドバッファの作成は「allocate」であるあたりから
+    // 「コマンドバッファの記録能力は既に用意したコマンドプールから割り当てる」という気持ちが読み取れる
+    // 
+    // CommandPoolCreateInfoのqueueFamilyIndexには、後でそのコマンドバッファを送信するときに対象とするキューを指定します。
+    // 結局送信するときにも「このコマンドバッファをこのキューに送信する」というのは指定するのですが、
+    // そこはあまり深く突っ込まないでください。こんな二度手間が盛り沢山なのがVulkanです。
+    // 次はコマンドバッファを作成します。
+    // allocateCommandBufferではなくallocateCommandBuffers である名前から分かる通り、一度にいくつも作れる仕様になっている
     vk::CommandPoolCreateInfo cmdPoolCreateInfo;
     cmdPoolCreateInfo.queueFamilyIndex = graphicsQueueFamilyIndex;
-
     vk::UniqueCommandPool cmdPool = device.createCommandPoolUnique(cmdPoolCreateInfo);
-    
+
+    // コマンドバッファとは、コマンドをため込んでおくバッファ
+    // VulkanでGPUに仕事をさせる際は「コマンドバッファの中にコマンドを記録し、そのコマンドバッファをキューに送る」必要がある
     vk::CommandBufferAllocateInfo cmdBufAllocInfo;
     cmdBufAllocInfo.commandPool = cmdPool.get();
     cmdBufAllocInfo.commandBufferCount = 1;
     cmdBufAllocInfo.level = vk::CommandBufferLevel::ePrimary;
-
     std::vector<vk::UniqueCommandBuffer> cmdBufs = device.allocateCommandBuffersUnique(cmdBufAllocInfo);
     vk::MemoryRequirements imgMemReq = device.getImageMemoryRequirements(image.get());
 
