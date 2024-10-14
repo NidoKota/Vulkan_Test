@@ -22,6 +22,13 @@ namespace Vulkan_Test
         //lock_guard<mutex> lock(coutMutex);
         cout << str;
     }
+    
+    //mutex coutMutex;
+    inline void cerrMultiThread(std::string str)
+    {
+        //lock_guard<mutex> lock(coutMutex);
+        cerr << str;
+    }
 
     inline string getTimeStamp()
     {
@@ -41,4 +48,7 @@ namespace Vulkan_Test
 
 #define LOG(x) \
 do { coutMultiThread(SS2STR(getTimeStamp() << " " << x << "\n")); } while (false)
+
+#define LOGERR(x) \
+do { cerrMultiThread(SS2STR(getTimeStamp() << " " << x << "\n")); } while (false)
 }

@@ -1,6 +1,8 @@
 #define VK_ENABLE_BETA_EXTENSIONS
 
 #include <vulkan/vulkan.hpp>
+#include <fstream>
+#include <filesystem>
 #include "Utility.hpp"
 
 using namespace Vulkan_Test;
@@ -71,35 +73,41 @@ int main()
         LOG(props.properties.deviceName);
     }
 
-    vk::PhysicalDevice physicalDevice;
-    bool existsSuitablePhysicalDevice = false;
+    // デバイスとキューの検索   
+    bool foundGraphicsQueue = false;
     uint32_t graphicsQueueFamilyIndex;
+    vk::PhysicalDevice physicalDevice;
     for (size_t i = 0; i < physicalDevices.size(); i++)
     {
         std::vector<vk::QueueFamilyProperties> queueProps = physicalDevices[i].getQueueFamilyProperties();
-        bool existsGraphicsQueue = false;
 
         for (size_t j = 0; j < queueProps.size(); j++)
         {
-            if (queueProps[j].queueFlags & vk::QueueFlagBits::eGraphics)
-            {
-                existsGraphicsQueue = true;
-                graphicsQueueFamilyIndex = j;
-                break;
-            }
+            if (!(queueProps[j].queueFlags & vk::QueueFlagBits::eGraphics)) continue;
+            
+            foundGraphicsQueue = true;
+            graphicsQueueFamilyIndex = j;
+            physicalDevice = physicalDevices[i];
+            break;
         }
 
-        if (existsGraphicsQueue)
+        if (foundGraphicsQueue)
         {
-            physicalDevice = physicalDevices[i];
-            existsSuitablePhysicalDevice = true;
             break;
         }
     }
 
-    if (!existsSuitablePhysicalDevice)
+    if (foundGraphicsQueue)
     {
-        std::cerr << "No physical devices are available." << std::endl;
+        vk::PhysicalDeviceProperties2 props = physicalDevice.getProperties2();
+        LOG("----------------------------------------");
+        LOG("Found device and queue");
+        LOG("physicalDevice: " << props.properties.deviceName);
+        LOG("graphicsQueueFamilyIndex: " << graphicsQueueFamilyIndex);
+    }
+    else
+    {
+        LOGERR("No physical devices are available");
         return EXIT_FAILURE;
     }
 
@@ -122,9 +130,7 @@ int main()
         LOG("----------------------------------------");
         LOG("queue family index: " << i);
         LOG("queue count: " << queueProps[i].queueCount);
-        LOG("graphic support: " << (queueProps[i].queueFlags & vk::QueueFlagBits::eGraphics ? "True" : "False"));
-        LOG("compute support: " << (queueProps[i].queueFlags & vk::QueueFlagBits::eCompute ? "True" : "False"));
-        LOG("transfer support: " << (queueProps[i].queueFlags & vk::QueueFlagBits::eTransfer ? "True" : "False"));
+        LOG(to_string(queueProps[i].queueFlags));
     }
 
     // Vulkanでは論理デバイスからキューを取得するとき、論理デバイスにあらかじめ「このキューを使うよ」ということを伝えておく必要がある
@@ -215,7 +221,299 @@ int main()
     imgCreateInfo.samples = vk::SampleCountFlagBits::e1;
 
     vk::UniqueImage image = device.createImageUnique(imgCreateInfo);
+
+    // イメージを使うためには、イメージにメモリを確保して割り当てる必要がある
+    // このとき使うメモリはnewやmallocで確保できる通常のメモリとは違う
+    // これから扱うのはデバイスメモリという特殊なメモリ
+    // 
+    // 実は、通常のメモリはGPUからアクセスすることができない
+    // そこでGPUからアクセスできる特殊なメモリを用意する必要がある
+    // それが「デバイスメモリ」
+    // 
+    // デバイスメモリはvk::Deviceの allocateMemory メソッドで確保する
+    // 確保したデバイスメモリは、bindImageMemoryメソッドで前節で作成したイメージに結びつけることができる
+    //
+    // new演算子やmallocなどで確保する通常のメモリとデバイスメモリの重要な違いとして、デバイスメモリには「種類」がある
+    // デバイスメモリを使う際はどれを使うか適切に選ばなければならない
+    // どんな種類のデバイスメモリがあるかは物理デバイス依存
+    // vk::PhysicalDeviceのgetMemoryPropertiesメソッドで取得できる
+
+    // vk::PhysicalDeviceMemoryProperties構造体にはGPUが何種類のメモリを持っているかを表す、
+    // memoryTypeCountメンバ変数、各種類のメモリに関する情報を表すmemoryTypesメンバ変数が格納されている
     vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
+    LOG("----------------------------------------");
+    LOG("memory type count: " << memProps.memoryTypeCount);
+    for (size_t i = 0; i < memProps.memoryTypeCount; i++)
+    {
+        LOG("----------------------------------------");
+        LOG("memory type index: " << i);
+        LOG("heap index: " << memProps.memoryTypes[i].heapIndex);
+        LOG(to_string(memProps.memoryTypes[i].propertyFlags));
+    }
+
+    // イメージに対してどんな種類のメモリがどれだけ必要かという情報はvk::DeviceのgetImageMemoryRequirementsで取得できる
+    // vk::MemoryRequirements構造体には必要なメモリサイズを表すsizeメンバ変数、
+    // そして使用可能なメモリの種類をビットマスクで表すmemoryTypeBitsメンバ変数が格納されている
+    vk::MemoryRequirements imgMemReq = device.getImageMemoryRequirements(image.get());
+    LOG("----------------------------------------");
+    LOG("img size: " << imgMemReq.size);
+    LOG("img memoryTypeBits: " << std::bitset<2>(imgMemReq.memoryTypeBits));
+
+    // 例えばmemoryTypeBitsの中身が2進数で0b00101011だった場合を考えてみる
+    // 右から0番目、1番目、3番目、5番目のビットが1になっているので、
+    // 使えるメモリの種類はメモリタイプ0番、1番、3番、5番となる
+    //
+    // メモリを確保するときはvk::MemoryAllocateInfoに必要なメモリのサイズと種類を指定する
+    //
+    // memoryTypeBitsを確認して、ビットが立っていればその番号のメモリタイプを使用する
+    // 今回は使えるメモリタイプの中から単純に一番最初に見つかったものを使用している
+    vk::MemoryAllocateInfo imgMemAllocInfo;
+    imgMemAllocInfo.allocationSize = imgMemReq.size;
+
+    bool foundSuitableMemoryType = false;
+    for (size_t i = 0; i < memProps.memoryTypeCount; i++)
+    {
+        if (imgMemReq.memoryTypeBits & (1 << i)) 
+        {
+            imgMemAllocInfo.memoryTypeIndex = i;
+            foundSuitableMemoryType = true;
+            break;
+        }
+    }
+
+    if (!foundSuitableMemoryType) 
+    {
+        LOGERR("No memory are available");
+        return EXIT_FAILURE;
+    }
+
+    vk::UniqueDeviceMemory imgMem = device.allocateMemoryUnique(imgMemAllocInfo);
+
+    // 第3引数の0は何かというと、「確保したメモリの先頭から何バイト目を使用するか」という項目である
+    // 例えば、メモリ1000バイトを要するイメージAとメモリ1500バイトを要するイメージBの2つがあった時、
+    // 2500バイトを確保して先頭から0バイト目以降をイメージAに、1000バイト目以降をイメージBにバインドするといったことができる
+    // ここでは普通に0を指定
+    device.bindImageMemory(image.get(), imgMem.get(), 0);
+
+    // 実は「イメージ」はこのままだとパイプラインの処理の中からは扱うことができない
+    // パイプラインで描画の対象として扱うには、
+    // 「イメージ」から「イメージビュー」という繋ぎのためのオブジェクトを作ってやる必要がある
+    // レンダーパスの中のそれぞれのアタッチメントには「イメージ」ではなく、
+    // この節で作成する「イメージビュー」を結び付けることになる
+    vk::ImageViewCreateInfo imgViewCreateInfo;
+    // imageにはイメージビューが指すイメージ
+    imgViewCreateInfo.image = image.get();
+    // viewTypeはイメージビューの種別
+    // 今回は元となるイメージに合わせて2Dを指定する
+    imgViewCreateInfo.viewType = vk::ImageViewType::e2D;
+    // formatにはイメージビューのフォーマット
+    // イメージの作成時に指定したフォーマットに合わせる
+    imgViewCreateInfo.format = vk::Format::eR8G8B8A8Unorm;
+    imgViewCreateInfo.components.r = vk::ComponentSwizzle::eIdentity;
+    imgViewCreateInfo.components.g = vk::ComponentSwizzle::eIdentity;
+    imgViewCreateInfo.components.b = vk::ComponentSwizzle::eIdentity;
+    imgViewCreateInfo.components.a = vk::ComponentSwizzle::eIdentity;
+    imgViewCreateInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    imgViewCreateInfo.subresourceRange.baseMipLevel = 0;
+    imgViewCreateInfo.subresourceRange.levelCount = 1;
+    imgViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+    imgViewCreateInfo.subresourceRange.layerCount = 1;
+    // Vulkanの仕様では一つのイメージオブジェクトが複数のレイヤーを持つことができる
+    // イメージビューによって、その中のどのレイヤーをアタッチメント(=描画対象)として使うのかといった部分を指定したりできる
+    // そうした部分をviewType, components, subresourceRangeなどで指定する
+    //
+    // 「イメージ」と「イメージビュー」の違いは、
+    // イメージがただの画像を表すオブジェクトなのに対し、
+    // イメージビューは「どのイメージを扱うか」と「そのイメージを描画処理の上でどのように扱うか」をひとまとめにしたオブジェクト
+    // と考えられる
+
+
+    vk::UniqueImageView imgView = device.createImageViewUnique(imgViewCreateInfo);
+
+    // 描画の対象となる場所ができたので、ここからは実際の描画処理を書く
+    // 描画をするにあたっては、まずレンダーパスというものが必要
+    // レンダーパスとは一言で言えば描画の処理順序を記述したオブジェクトで、Vulkanにおける描画処理の際には必ず必要になる
+    // 大ざっぱな計画書みたいなもので、コマンド(＝具体的な作業手順)とは別物
+
+    // レンダーパスの情報を構成するものは３つある
+    // 「アタッチメント」「サブパス」「サブパス依存性」
+    //
+    // アタッチメントはレンダーパスにおいて描画処理の対象となる画像データのこと
+    // 書き込まれたり読み込まれたりする
+    //
+    // サブパスは1つの描画処理のことで、単一または複数のサブパスが集まってレンダーパス全体を構成する
+    // サブパスは任意の個数のアタッチメントを入力として受け取り、任意の個数のアタッチメントに描画結果を出力する
+    //
+    // サブパス依存性はサブパス間の依存関係
+    // 「サブパス1番が終わってからでないとサブパス2番は実行できない」とかそういう関係を表す
+    //
+    // 有向グラフとして考えてみると分かりやすい
+    // 
+    // 複雑なレンダーパスで複雑な描画処理を表現することもできるが、
+    // 今回は1つのサブパスと1つのアタッチメントだけで構成される単純なレンダーパスを作成する
+
+    // レンダーパスは処理(サブパス)とデータ(アタッチメント)のつながりと関係性を記述するが、
+    // 具体的な処理内容やどのデータを扱うかについては関与しません。具体的な処理内容はコマンドバッファに積むコマンドやパイプラインによって決まりますが、具体的なデータの方を決めるためのものがフレームバッファです。
+    // フレームバッファを介して「0番のアタッチメントはこのイメージビュー、1番のアタッチメントは…」という結び付けを行うことで初めてレンダーパスが使えます。
+
+
+
+    vk::AttachmentDescription attachments[1];
+    attachments[0].format = vk::Format::eR8G8B8A8Unorm;
+    attachments[0].samples = vk::SampleCountFlagBits::e1;
+    attachments[0].loadOp = vk::AttachmentLoadOp::eDontCare;
+    attachments[0].storeOp = vk::AttachmentStoreOp::eStore;
+    attachments[0].stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
+    attachments[0].stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+    attachments[0].initialLayout = vk::ImageLayout::eUndefined;
+    attachments[0].finalLayout = vk::ImageLayout::eGeneral;
+
+    // vk::AttachmentReference構造体のattachmentメンバは「何番のアタッチメント」という形で
+    // レンダーパスの中のアタッチメントを指定する
+    // ここでは0を指定しているので0番のアタッチメントの意味
+    vk::AttachmentReference subpass0_attachmentRefs[1];
+    subpass0_attachmentRefs[0].attachment = 0;
+    subpass0_attachmentRefs[0].layout = vk::ImageLayout::eColorAttachmentOptimal;
+
+    vk::SubpassDescription subpasses[1];
+    subpasses[0].pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
+    subpasses[0].colorAttachmentCount = std::size(subpass0_attachmentRefs);
+    subpasses[0].pColorAttachments = subpass0_attachmentRefs;
+
+    vk::RenderPassCreateInfo renderpassCreateInfo;
+    renderpassCreateInfo.attachmentCount = std::size(attachments);
+    renderpassCreateInfo.pAttachments = attachments;
+    renderpassCreateInfo.subpassCount = std::size(subpasses);
+    renderpassCreateInfo.pSubpasses = subpasses;
+    renderpassCreateInfo.dependencyCount = 0;
+    renderpassCreateInfo.pDependencies = nullptr;
+
+    // レンダーパスを作成
+    vk::UniqueRenderPass renderpass = device.createRenderPassUnique(renderpassCreateInfo);
+
+    // 頂点シェーダーを読み込む
+    size_t vertSpvFileSz = std::filesystem::file_size("../src/shader.vert.spv");
+    std::ifstream vertSpvFile = std::ifstream("../src/shader.vert.spv", std::ios_base::binary);
+    std::vector<char> vertSpvFileData = std::vector<char>(vertSpvFileSz);
+    vertSpvFile.read(vertSpvFileData.data(), vertSpvFileSz);
+
+    vk::ShaderModuleCreateInfo vertShaderCreateInfo;
+    vertShaderCreateInfo.codeSize = vertSpvFileSz;
+    vertShaderCreateInfo.pCode = reinterpret_cast<const uint32_t*>(vertSpvFileData.data());
+    vk::UniqueShaderModule vertShader = device.createShaderModuleUnique(vertShaderCreateInfo);
+
+    // フラグメントシェーダーを読み込む
+    size_t fragSpvFileSz = std::filesystem::file_size("../src/shader.frag.spv");
+    std::ifstream fragSpvFile = std::ifstream("../src/shader.frag.spv", std::ios_base::binary);
+    std::vector<char> fragSpvFileData = std::vector<char>(fragSpvFileSz);
+    fragSpvFile.read(fragSpvFileData.data(), fragSpvFileSz);
+
+    vk::ShaderModuleCreateInfo fragShaderCreateInfo;
+    fragShaderCreateInfo.codeSize = fragSpvFileSz;
+    fragShaderCreateInfo.pCode = reinterpret_cast<const uint32_t*>(fragSpvFileData.data());
+    vk::UniqueShaderModule fragShader = device.createShaderModuleUnique(fragShaderCreateInfo);
+
+    // これでレンダーパスが作成できたが、
+    // レンダーパスはあくまで「この処理はこのデータを相手にする、あの処理はあのデータを～」
+    // という関係性を表す”枠組み”に過ぎず、それぞれの処理(＝サブパス)が具体的にどのような処理を行うかは関知しない
+    // 実際にはいろいろなコマンドを任意の回数呼ぶことができる
+    
+    // パイプラインとは、3DCGの基本的な描画処理をひとつながりにまとめたもの
+    // パイプラインは「点の集まりで出来た図形を色のついたピクセルの集合に変換するもの」
+    // ほぼ全ての3DCGは三角形の集まりであり、私たちが最初に持っているものは三角形の各点の色や座標であるが、
+    // 最終的に欲しいものは画面のどのピクセルがどんな色なのかという情報である
+    // この間を繋ぐ演算処理は大体お決まりのパターンになっており、まとめてグラフィックスパイプラインとなっている
+
+    // この処理は全ての部分が固定されているものではなく、プログラマ側で色々指定する部分があり、
+    // それらの情報をまとめたものがパイプラインオブジェクト(vk::Pipeline)である
+    // 実際に使用して描画処理を行う際はコマンドでパイプラインをバインドし、ドローコールを呼ぶ
+
+    // Vulkanにおけるパイプラインには「グラフィックスパイプライン」と「コンピュートパイプライン」の2種類がある
+    // コンピュートパイプラインはGPGPUなどに使うもの
+    // 今回は普通に描画が目的なのでグラフィックスパイプラインを作成する
+    // グラフィックスパイプラインはvk::DeviceのcreateGraphicsPipelineメソッドで作成できる
+    vk::Viewport viewports[1];
+    viewports[0].x = 0.0;
+    viewports[0].y = 0.0;
+    viewports[0].minDepth = 0.0;
+    viewports[0].maxDepth = 1.0;
+    viewports[0].width = screenWidth;
+    viewports[0].height = screenHeight;
+
+    vk::Rect2D scissors[1];
+    scissors[0].offset = vk::Offset2D(0, 0);
+    scissors[0].extent = vk::Extent2D(screenWidth, screenHeight);
+
+    vk::PipelineViewportStateCreateInfo viewportState;
+    viewportState.viewportCount = 1;
+    viewportState.pViewports = viewports;
+    viewportState.scissorCount = 1;
+    viewportState.pScissors = scissors;
+
+    vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
+    vertexInputInfo.vertexAttributeDescriptionCount = 0;
+    vertexInputInfo.pVertexAttributeDescriptions = nullptr;
+    vertexInputInfo.vertexBindingDescriptionCount = 0;
+    vertexInputInfo.pVertexBindingDescriptions = nullptr;
+
+    vk::PipelineInputAssemblyStateCreateInfo inputAssembly;
+    inputAssembly.topology = vk::PrimitiveTopology::eTriangleList;
+    inputAssembly.primitiveRestartEnable = false;
+
+    vk::PipelineRasterizationStateCreateInfo rasterizer;
+    rasterizer.depthClampEnable = false;
+    rasterizer.rasterizerDiscardEnable = false;
+    rasterizer.polygonMode = vk::PolygonMode::eFill;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = vk::CullModeFlagBits::eBack;
+    rasterizer.frontFace = vk::FrontFace::eClockwise;
+    rasterizer.depthBiasEnable = false;
+
+    vk::PipelineMultisampleStateCreateInfo multisample;
+    multisample.sampleShadingEnable = false;
+    multisample.rasterizationSamples = vk::SampleCountFlagBits::e1;
+
+    vk::PipelineColorBlendAttachmentState blendattachment[1];
+    blendattachment[0].colorWriteMask =
+        vk::ColorComponentFlagBits::eA |
+        vk::ColorComponentFlagBits::eR |
+        vk::ColorComponentFlagBits::eG |
+        vk::ColorComponentFlagBits::eB;
+    blendattachment[0].blendEnable = false;
+
+    vk::PipelineColorBlendStateCreateInfo blend;
+    blend.logicOpEnable = false;
+    blend.attachmentCount = 1;
+    blend.pAttachments = blendattachment;
+
+    vk::PipelineLayoutCreateInfo layoutCreateInfo;
+    layoutCreateInfo.setLayoutCount = 0;
+    layoutCreateInfo.pSetLayouts = nullptr;
+
+    vk::UniquePipelineLayout pipelineLayout = device.createPipelineLayoutUnique(layoutCreateInfo);
+
+    vk::PipelineShaderStageCreateInfo shaderStage[2];
+    shaderStage[0].stage = vk::ShaderStageFlagBits::eVertex;
+    shaderStage[0].module = vertShader.get();
+    shaderStage[0].pName = "main";
+    shaderStage[1].stage = vk::ShaderStageFlagBits::eFragment;
+    shaderStage[1].module = fragShader.get();
+    shaderStage[1].pName = "main";
+    
+    vk::GraphicsPipelineCreateInfo pipelineCreateInfo;
+    pipelineCreateInfo.pViewportState = &viewportState;
+    pipelineCreateInfo.pVertexInputState = &vertexInputInfo;
+    pipelineCreateInfo.pInputAssemblyState = &inputAssembly;
+    pipelineCreateInfo.pRasterizationState = &rasterizer;
+    pipelineCreateInfo.pMultisampleState = &multisample;
+    pipelineCreateInfo.pColorBlendState = &blend;
+    pipelineCreateInfo.layout = pipelineLayout.get();
+    pipelineCreateInfo.renderPass = renderpass.get();
+    pipelineCreateInfo.subpass = 0;
+    pipelineCreateInfo.stageCount = std::size(shaderStage);
+    pipelineCreateInfo.pStages = shaderStage;
+
+    vk::UniquePipeline pipeline = device.createGraphicsPipelineUnique(nullptr, pipelineCreateInfo).value;
 
     // コマンドバッファを作るには、その前段階として「コマンドプール」というまた別のオブジェクトを作る必要がある
     // コマンドバッファをコマンドの記録に使うオブジェクトとすれば、コマンドプールというのはコマンドを記録するためのメモリ実体
@@ -244,7 +542,6 @@ int main()
     cmdBufAllocInfo.commandBufferCount = 1;
     cmdBufAllocInfo.level = vk::CommandBufferLevel::ePrimary;
     std::vector<vk::UniqueCommandBuffer> cmdBufs = device.allocateCommandBuffersUnique(cmdBufAllocInfo);
-    vk::MemoryRequirements imgMemReq = device.getImageMemoryRequirements(image.get());
 
     // コマンドを記録
     vk::CommandBufferBeginInfo cmdBeginInfo;
