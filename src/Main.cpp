@@ -187,6 +187,20 @@ int main()
     const uint32_t screenHeight = 480;
 
     // Vulkanにおいて画像は vk::Image というオブジェクトで表される
+    // imageType には画像の次元を指定する
+    // 1次元から3次元まで指定できる
+    // 2次元以外の画像は、Rampテクスチャやvoxelなどで使用することがある
+    // 
+    // extent には画像のサイズを指定する
+    // ここでは640×480を指定(１は奥行き)
+    // 
+    // format には画素のフォーマットの種類を指定
+    // どのように各ピクセルが色を保存しているかの情報
+    // いろいろなフォーマットが存在するが、今回はひとまずR8G8B8A8Unormという形式を指定する
+    // RGB + A(透明度)をこの順でそれぞれ8bitで保存する形式
+    // 
+    // これで画像オブジェクトを作成することができた
+    // しかしこの段階ではまだ画像にメモリが割り当てられていない
     // https://registry.khronos.org/vulkan/specs/1.3-extensions/html/vkspec.html#VkImageCreateInfo
     vk::ImageCreateInfo imgCreateInfo;
     imgCreateInfo.imageType = vk::ImageType::e2D;
