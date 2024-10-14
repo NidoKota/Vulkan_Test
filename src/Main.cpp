@@ -262,7 +262,7 @@ int main()
     vk::MemoryRequirements imgMemReq = device.getImageMemoryRequirements(image.get());
     LOG("----------------------------------------");
     LOG("img size: " << imgMemReq.size);
-    LOG("img memoryTypeBits: " << std::bitset<2>(imgMemReq.memoryTypeBits));
+    LOG("img memoryTypeBits: " << imgMemReq.memoryTypeBits);
 
     // 例えばmemoryTypeBitsの中身が2進数で0b00101011だった場合を考えてみる
     // 右から0番目、1番目、3番目、5番目のビットが1になっているので、
