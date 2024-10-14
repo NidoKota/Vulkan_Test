@@ -1,9 +1,11 @@
 #define VK_ENABLE_BETA_EXTENSIONS
+#define STB_IMAGE_WRITE_IMPLEMENTATION
 
 #include <vulkan/vulkan.hpp>
 #include <fstream>
 #include <filesystem>
-#include "Utility.hpp"
+#include "../include/Utility.hpp"
+#include "../include/stb/stb_image_write.h"
 
 using namespace Vulkan_Test;
 
@@ -33,6 +35,9 @@ const char* requiredDeviceExtentions[] =
 // cd mac
 // cmake .
 // make
+
+// glslc ../src/shader.vert -o ../src/shader.vert.spv
+// glslc ../src/shader.frag -o ../src/shader.frag.spv
 
 int main()
 {
@@ -273,7 +278,7 @@ int main()
     bool foundSuitableMemoryType = false;
     for (size_t i = 0; i < memProps.memoryTypeCount; i++)
     {
-        if (imgMemReq.memoryTypeBits & (1 << i)) 
+        if (imgMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible))
         {
             imgMemAllocInfo.memoryTypeIndex = i;
             foundSuitableMemoryType = true;
@@ -354,7 +359,8 @@ int main()
     vk::AttachmentDescription attachments[1];
     attachments[0].format = vk::Format::eR8G8B8A8Unorm;
     attachments[0].samples = vk::SampleCountFlagBits::e1;
-    attachments[0].loadOp = vk::AttachmentLoadOp::eDontCare;
+    // attachments[0].loadOp = vk::AttachmentLoadOp::eDontCare;
+    attachments[0].loadOp = vk::AttachmentLoadOp::eClear;  
     attachments[0].storeOp = vk::AttachmentStoreOp::eStore;
     attachments[0].stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
     attachments[0].stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
@@ -570,12 +576,15 @@ int main()
     vk::CommandBufferBeginInfo cmdBeginInfo;
     cmdBufs[0]->begin(cmdBeginInfo);
     {
+        vk::ClearValue clearVals[1];
+        clearVals[0].color = vk::ClearColorValue(0, 0, 0, 1);
+
         vk::RenderPassBeginInfo renderpassBeginInfo;
         renderpassBeginInfo.renderPass = renderpass.get();
         renderpassBeginInfo.framebuffer = frameBuf.get();
         renderpassBeginInfo.renderArea = vk::Rect2D({ 0,0 }, { screenWidth, screenHeight });
-        renderpassBeginInfo.clearValueCount = 0;
-        renderpassBeginInfo.pClearValues = nullptr;
+        renderpassBeginInfo.clearValueCount = std::size(clearVals);
+        renderpassBeginInfo.pClearValues = clearVals;
 
         // 描画処理は、どのパイプラインを使って行うかを示す必要がある
         // これはbindPipelineというコマンドで行う
@@ -583,6 +592,7 @@ int main()
         {
             // ここでサブパス0番の処理
             cmdBufs[0]->bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.get());
+
             // 全てはこれをやるための道のり！
             cmdBufs[0]->draw(3, 1, 0, 0);
             // 第1引数は頂点の数、これが3つということは頂点シェーダは3回呼び出され三角形が1つ描かれることを意味する
@@ -630,6 +640,10 @@ int main()
     // 
     // キューのwaitIdleメソッドを呼ぶと、その段階でキューに入っているコマンドが全て実行完了してキューが空になるまで待つことができる
     graphicsQueue.waitIdle();
+
+    void* imgData = device.mapMemory(imgMem.get(), 0, imgMemReq.size);
+    stbi_write_bmp("img.bmp", screenWidth, screenHeight, 4, imgData);
+    device.unmapMemory(imgMem.get());
 
     return EXIT_SUCCESS;
 }
