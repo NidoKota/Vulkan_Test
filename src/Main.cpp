@@ -39,7 +39,7 @@ int main()
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "NoEngine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = vk::ApiVersion11;
+    appInfo.apiVersion = vk::ApiVersion11; // Vulkan1.1以降に導入された関数を使うために変更
     
     // これに色々情報を乗っけることで
     // 例えばVulkanの拡張機能をオンにしたりだとかデバッグ情報を表示させるといったことができる

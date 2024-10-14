@@ -36,4 +36,5 @@
 .vscode/
 
 /build
-/mac
+/mac/*
+!CMakeLists.txt
