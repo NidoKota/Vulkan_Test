@@ -35,6 +35,7 @@
 .vs/
 .vscode/
 
+.DS_Store
 /build
 /mac/*
 !CMakeLists.txt

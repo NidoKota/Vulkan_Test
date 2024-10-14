@@ -327,7 +327,6 @@ int main()
     // イメージビューは「どのイメージを扱うか」と「そのイメージを描画処理の上でどのように扱うか」をひとまとめにしたオブジェクト
     // と考えられる
 
-
     vk::UniqueImageView imgView = device.createImageViewUnique(imgViewCreateInfo);
 
     // 描画の対象となる場所ができたので、ここからは実際の描画処理を書く
@@ -351,12 +350,6 @@ int main()
     // 
     // 複雑なレンダーパスで複雑な描画処理を表現することもできるが、
     // 今回は1つのサブパスと1つのアタッチメントだけで構成される単純なレンダーパスを作成する
-
-    // レンダーパスは処理(サブパス)とデータ(アタッチメント)のつながりと関係性を記述するが、
-    // 具体的な処理内容やどのデータを扱うかについては関与しません。具体的な処理内容はコマンドバッファに積むコマンドやパイプラインによって決まりますが、具体的なデータの方を決めるためのものがフレームバッファです。
-    // フレームバッファを介して「0番のアタッチメントはこのイメージビュー、1番のアタッチメントは…」という結び付けを行うことで初めてレンダーパスが使えます。
-
-
 
     vk::AttachmentDescription attachments[1];
     attachments[0].format = vk::Format::eR8G8B8A8Unorm;
@@ -515,6 +508,14 @@ int main()
 
     vk::UniquePipeline pipeline = device.createGraphicsPipelineUnique(nullptr, pipelineCreateInfo).value;
 
+    // レンダーパスは処理(サブパス)とデータ(アタッチメント)のつながりと関係性を記述するが、具体的な処理内容やどのデータを扱うかについては関与しない
+    // 具体的な処理内容はコマンドバッファに積むコマンドやパイプラインによって決まるが、具体的なデータの方を決めるためのものがフレームバッファである
+    
+    // イメージビューの情報を初期化用構造体に入れている
+    // これで0番のアタッチメントがどのイメージビューに対応しているのかを示すことができる
+    vk::ImageView frameBufAttachments[1];
+    frameBufAttachments[0] = imgView.get();
+
     // コマンドバッファを作るには、その前段階として「コマンドプール」というまた別のオブジェクトを作る必要がある
     // コマンドバッファをコマンドの記録に使うオブジェクトとすれば、コマンドプールというのはコマンドを記録するためのメモリ実体
     // コマンドバッファを作る際には必ず必要
@@ -522,11 +523,10 @@ int main()
     // コマンドプールの作成が「create」なのに対し、コマンドバッファの作成は「allocate」であるあたりから
     // 「コマンドバッファの記録能力は既に用意したコマンドプールから割り当てる」という気持ちが読み取れる
     // 
-    // CommandPoolCreateInfoのqueueFamilyIndexには、後でそのコマンドバッファを送信するときに対象とするキューを指定します。
-    // 結局送信するときにも「このコマンドバッファをこのキューに送信する」というのは指定するのですが、
-    // そこはあまり深く突っ込まないでください。こんな二度手間が盛り沢山なのがVulkanです。
-    // 次はコマンドバッファを作成します。
-    // allocateCommandBufferではなくallocateCommandBuffers である名前から分かる通り、一度にいくつも作れる仕様になっている
+    // CommandPoolCreateInfoのqueueFamilyIndexには、後でそのコマンドバッファを送信するときに対象とするキューを指定する
+    // 結局送信するときにも「このコマンドバッファをこのキューに送信する」というのは指定するが、こんな二度手間が盛り沢山なのがVulkanである
+    // 次はコマンドバッファを作成する
+    // allocateCommandBufferではなくallocateCommandBuffersである名前から分かる通り、一度にいくつも作れる仕様になっている
     vk::CommandPoolCreateInfo cmdPoolCreateInfo;
     cmdPoolCreateInfo.queueFamilyIndex = graphicsQueueFamilyIndex;
     vk::UniqueCommandPool cmdPool = device.createCommandPoolUnique(cmdPoolCreateInfo);
@@ -543,10 +543,68 @@ int main()
     cmdBufAllocInfo.level = vk::CommandBufferLevel::ePrimary;
     std::vector<vk::UniqueCommandBuffer> cmdBufs = device.allocateCommandBuffersUnique(cmdBufAllocInfo);
 
+    // フレームバッファを介して「0番のアタッチメントはこのイメージビュー、1番のアタッチメントは…」という結び付けを行うことで初めてレンダーパスが使える
+    vk::FramebufferCreateInfo frameBufCreateInfo;
+    frameBufCreateInfo.width = screenWidth;
+    frameBufCreateInfo.height = screenHeight;
+    frameBufCreateInfo.layers = 1;
+    frameBufCreateInfo.renderPass = renderpass.get();
+    frameBufCreateInfo.attachmentCount = 1;
+    frameBufCreateInfo.pAttachments = frameBufAttachments;
+
+    vk::UniqueFramebuffer frameBuf = device.createFramebufferUnique(frameBufCreateInfo);
+    // ここで注意だが、初期化用構造体にレンダーパスの情報を入れてはいるものの、これでレンダーパスとイメージビューが結びついた訳ではない
+    // ここで入れているレンダーパスの情報はあくまで「このフレームバッファはどのレンダーパスと結びつけることができるのか」を表しているに過ぎず、
+    // フレームバッファを作成した時点で結びついた訳ではない
+    // フレームバッファとレンダーパスを本当に結びつける処理はこの次に行う
+    // 
+    // パイプラインの作成処理でもレンダーパスの情報を渡していますが、ここにも同じ事情がある
+    // フレームバッファとパイプラインは特定のレンダーパスに依存して作られるものであり、互換性のない他のレンダーパスのために働こうと思ってもそのようなことはできない
+    // 結びつけを行っている訳ではないのにレンダーパスの情報を渡さなければならないのはそのため
+
+    // レンダーパスの開始と終了を指示するコマンドを送る
+    // Vulkanにおける描画処理は必ずレンダーパスの枠組みで行う必要がある
+    // コマンドバッファのbeginRenderPassメソッドとendRenderPassメソッドでそれぞれレンダーパスの開始と終了を行うコマンドを記録できる
+
     // コマンドを記録
     vk::CommandBufferBeginInfo cmdBeginInfo;
     cmdBufs[0]->begin(cmdBeginInfo);
+    {
+        vk::RenderPassBeginInfo renderpassBeginInfo;
+        renderpassBeginInfo.renderPass = renderpass.get();
+        renderpassBeginInfo.framebuffer = frameBuf.get();
+        renderpassBeginInfo.renderArea = vk::Rect2D({ 0,0 }, { screenWidth, screenHeight });
+        renderpassBeginInfo.clearValueCount = 0;
+        renderpassBeginInfo.pClearValues = nullptr;
 
+        // 描画処理は、どのパイプラインを使って行うかを示す必要がある
+        // これはbindPipelineというコマンドで行う
+        cmdBufs[0]->beginRenderPass(renderpassBeginInfo, vk::SubpassContents::eInline);
+        {
+            // ここでサブパス0番の処理
+            cmdBufs[0]->bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.get());
+            // 全てはこれをやるための道のり！
+            cmdBufs[0]->draw(3, 1, 0, 0);
+            // 第1引数は頂点の数、これが3つということは頂点シェーダは3回呼び出され三角形が1つ描かれることを意味する
+            // 第2引数はインスタンスの数
+            // 複数のインスタンスを扱うと同じ格好をした物体を一度に複数まとめて描画できる
+            // 第3引数・第4引数は頂点のオフセットとインスタンスのオフセット
+            // 例えば頂点の情報が2000個分あって、前の1000頂点が物体Aのモデルデータを表し後の1000頂点が物体Bのモデルデータを表すといった場合、
+            // 第3引数に1000を渡すことで物体Bのモデル描画に使うことができる
+        }
+
+        // レンダーパスを開始した直後に何らかのコマンドを送ればサブパス0番の中の処理という扱いになる
+        // ここではサブパス1個だけのレンダーパスを使っているため、そのままレンダーパスを終える
+        // なお、複数のサブパスを持つレンダーパスを用いる場合は以下のようにnextSubpassというコマンドで次のサブパスへ移行する
+
+        // cmdBufs[0]->nextSubpass(vk::SubpassContents::eInline);
+        // サブパス1番の処理
+        // cmdBufs[0]->nextSubpass(vk::SubpassContents::eInline);
+        // サブパス2番の処理
+        // cmdBufs[0]->endRenderPass();
+
+        cmdBufs[0]->endRenderPass();
+    }
     cmdBufs[0]->end();
 
     // コマンドの記録が終わったらそれをキューに送信
@@ -558,7 +616,7 @@ int main()
     submitInfo.commandBufferCount = std::size(submitCmdBuf);
     submitInfo.pCommandBuffers = submitCmdBuf;
 
-    // 送信はvk::Queueの submit メソッドで行う
+    // 送信はvk::Queueのsubmitメソッドで行う
     // 第2引数は現在nullptrにしているが、本来はフェンスというものを指定することができる
     // こうしてsubmitでGPUに命令を送ることが出来るが、あくまで「送る」だけである
     // キューに仕事を詰め込むだけであるため、submitから処理が返ってきた段階で送った命令が完了されているとは限らない
