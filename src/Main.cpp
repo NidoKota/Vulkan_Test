@@ -11,11 +11,6 @@
 
 using namespace Vulkan_Test;
 
-std::vector<const char*> requiredLayers = 
-{ 
-    "VK_LAYER_KHRONOS_validation" 
-};
-
 // https://chaosplant.tech/do/vulkan/
 // https://registry.khronos.org/vulkan/specs/1.3-extensions/html/vkspec.html
 // https://vulkan-tutorial.com/Drawing_a_triangle/Setup/Base_code
@@ -53,29 +48,23 @@ int main()
     vk::InstanceCreateInfo instCreateInfo;
     instCreateInfo.pApplicationInfo = &appInfo;
 
-    uint32_t requiredExtensionsCount;
-    const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&requiredExtensionsCount);
-    std::vector<const char*> requiredExtensions = std::vector<const char*>(requiredExtensionsCount);
-    std::memcpy(&*requiredExtensions.begin(), glfwExtensions, sizeof(const char*) * requiredExtensionsCount);
+    uint32_t glfwExtensionsCount;
+    const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionsCount);
+    std::vector<const char*> insRequiredExtensions = std::vector<const char*>(glfwExtensionsCount);
+    std::memcpy(&*insRequiredExtensions.begin(), glfwExtensions, sizeof(const char*) * glfwExtensionsCount);
 
-    std::vector<const char*> devRequiredExtensions = 
-    {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME 
-    };
-    std::copy(devRequiredExtensions.begin(), devRequiredExtensions.end(), std::back_inserter(requiredExtensions));
-    
 #ifdef __APPLE__
     std::vector<const char*> appleRrequiredExtentions = 
     { 
         vk::KHRPortabilityEnumerationExtensionName
     };
-    std::copy(appleRrequiredExtentions.begin(), appleRrequiredExtentions.end(), std::back_inserter(requiredExtensions));
+    std::copy(appleRrequiredExtentions.begin(), appleRrequiredExtentions.end(), std::back_inserter(insRequiredExtensions));
 #endif
 
-    instCreateInfo.enabledExtensionCount = requiredExtensions.size();
-    instCreateInfo.ppEnabledExtensionNames = &*requiredExtensions.begin();
+    instCreateInfo.enabledExtensionCount = insRequiredExtensions.size();
+    instCreateInfo.ppEnabledExtensionNames = &*insRequiredExtensions.begin();
 
-    LOG("Extensions");
+    LOG("Instance Extensions");
     for (int i = 0; i < instCreateInfo.enabledExtensionCount; i++) 
     {
         LOG("----------------------------------------");
@@ -107,6 +96,8 @@ int main()
         return EXIT_FAILURE;
     }
 
+    // 表示する先の画面は「サーフェス」というオブジェクトで抽象化されている
+    // ウィンドウやスクリーンなど、「表示する先として使える何か」は全てサーフェスという同じ種類のオブジェクトで表され、統一的に扱うことができる
     VkSurfaceKHR c_surface;
     VkResult result = glfwCreateWindowSurface(instance, window, nullptr, &c_surface);
     if (result != VK_SUCCESS) 
@@ -118,7 +109,8 @@ int main()
         return EXIT_FAILURE;
     }
 
-    vk::UniqueSurfaceKHR surface = vk::UniqueSurfaceKHR(c_surface, instance);
+    vk::UniqueSurfaceKHR surfacePtr = vk::UniqueSurfaceKHR(c_surface, instance);
+    vk::SurfaceKHR surface = surfacePtr.get();
 
     // GPUが複数あるなら頼む相手をまず選ぶ必要がある
     // GPUの型式などによってサポートしている機能とサポートしていない機能があったりするため、
@@ -167,7 +159,12 @@ int main()
             }
         }
 
-        if (foundGraphicsQueue && supportsSwapchainExtension) 
+        // デバイスがサーフェスを間違いなくサポートしていることを確かめる
+        bool supportsSurface =
+            !physicalDevices[i].getSurfaceFormatsKHR(surface).empty() ||
+            !physicalDevices[i].getSurfacePresentModesKHR(surface).empty();
+
+        if (foundGraphicsQueue && supportsSwapchainExtension && supportsSurface) 
         {
             physicalDevice = physicalDevices[i];
             existsSuitablePhysicalDevice = true;
@@ -243,6 +240,10 @@ int main()
     
     // インスタンスを作成するときにvk::InstanceCreateInfo構造体を使ったのと同じように、
     // 論理デバイス作成時にもvk::DeviceCreateInfo構造体の中に色々な情報を含めることができる
+    std::vector<const char*> requiredLayers = 
+    { 
+        "VK_LAYER_KHRONOS_validation" 
+    };
     vk::DeviceCreateInfo devCreateInfo;
     devCreateInfo.enabledLayerCount = requiredLayers.size();
     devCreateInfo.ppEnabledLayerNames = &*requiredLayers.begin();
@@ -251,9 +252,10 @@ int main()
 
     // スワップチェーンは拡張機能なので、機能を有効化する必要がある
     // スワップチェーンは「デバイスレベル」の拡張機能
-#ifdef __APPLE__
-
-#endif
+    std::vector<const char*> devRequiredExtensions = 
+    {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME 
+    };
     devCreateInfo.enabledExtensionCount = devRequiredExtensions.size();
     devCreateInfo.ppEnabledExtensionNames = &*devRequiredExtensions.begin();
 
@@ -263,6 +265,51 @@ int main()
     // vk::PhysicalDeviceは単に物理的なデバイスの情報を表しているに過ぎないので、構築したり破棄したりする必要がある類のオブジェクトではない
     vk::UniqueDevice devicePtr = physicalDevice.createDeviceUnique(devCreateInfo);
     vk::Device device = devicePtr.get();
+
+    // 一般的なコンピュータは、アニメーションを描画・表示する際に「描いている途中」が見えないようにするため、
+    // 2枚以上のキャンバスを用意して、1枚を使って現在のフレームを表示させている裏で別の1枚に次のフレームを描画する、という仕組みを採用している
+    // スワップチェーンは、一言で言えば「画面に表示されようとしている画像の連なり」
+    // この3つのAPIは、「サーフェスの情報」および「物理デバイスが対象のサーフェスを扱う能力」の情報を取得するAPIである
+    vk::SurfaceCapabilitiesKHR surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(surface);
+    std::vector<vk::SurfaceFormatKHR> surfaceFormats = physicalDevice.getSurfaceFormatsKHR(surface);
+    std::vector<vk::PresentModeKHR> surfacePresentModes = physicalDevice.getSurfacePresentModesKHR(surface);
+
+    vk::SurfaceFormatKHR swapchainFormat = surfaceFormats[0];
+    vk::PresentModeKHR swapchainPresentMode = surfacePresentModes[0];
+
+    // imageFormatやimageColorSpaceなどには、スワップチェーンが取り扱う画像の形式などを指定する
+    // しかしこれらに指定できる値はサーフェスとデバイスの事情によって制限されるものであり、自由に決めることができるものではない
+    // ここに指定する値は、必ずgetSurfaceFormatsKHRが返した配列に含まれる組み合わせでなければならない
+
+    // minImageCountはスワップチェーンが扱うイメージの数
+    // getSurfaceCapabilitiesKHRで得られたminImageCount(最小値)とmaxImageCount(最大値)の間の数なら何枚でも問題ない
+    // https://vulkan-tutorial.com/
+    // の記述に従って最小値+1を指定する
+
+    // imageExtentはスワップチェーンの画像サイズを表す
+    // getSurfaceCapabilitiesKHRで得られたminImageExtent(最小値)とmaxImageExtent(最大値)の間でなければならない
+    // currentExtentで現在のサイズが得られるため、それを指定
+
+    // preTransformは表示時の画面反転・画面回転などのオプションを指定する
+    // これもgetSurfaceCapabilitiesKHRの戻り値に依存する
+    // supportedTransformsでサポートされている中に含まれるものでなければならないので、無難なcurrentTransform(現在の画面設定)を指定
+
+    // resentModeは表示処理のモードを示すもの
+    // getSurfacePresentModesKHRの戻り値の配列に含まれる値である必要がある
+    vk::SwapchainCreateInfoKHR swapchainCreateInfo;
+    swapchainCreateInfo.surface = surface;
+    swapchainCreateInfo.minImageCount = surfaceCapabilities.minImageCount + 1;
+    swapchainCreateInfo.imageFormat = swapchainFormat.format;
+    swapchainCreateInfo.imageColorSpace = swapchainFormat.colorSpace;
+    swapchainCreateInfo.imageExtent = surfaceCapabilities.currentExtent;
+    swapchainCreateInfo.imageArrayLayers = 1;
+    swapchainCreateInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
+    swapchainCreateInfo.imageSharingMode = vk::SharingMode::eExclusive;
+    swapchainCreateInfo.preTransform = surfaceCapabilities.currentTransform;
+    swapchainCreateInfo.presentMode = swapchainPresentMode;
+    swapchainCreateInfo.clipped = VK_TRUE;
+
+    vk::UniqueSwapchainKHR swapchain = device.createSwapchainKHRUnique(swapchainCreateInfo);
 
     // キューは論理デバイス(vk::Device)の getQueue メソッドで取得できる
     // 第1引数がキューファミリのインデックス、第2引数が取得したいキューのキューファミリ内でのインデックス
