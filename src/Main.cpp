@@ -1,7 +1,9 @@
 #define VK_ENABLE_BETA_EXTENSIONS
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 
+#include <iostream>
 #include <vulkan/vulkan.hpp>
+#include <GLFW/glfw3.h>
 #include <fstream>
 #include <filesystem>
 #include "../include/Utility.hpp"
@@ -27,8 +29,8 @@ const char* requiredDeviceExtentions[] =
 // https://vulkan-tutorial.com/Drawing_a_triangle/Setup/Base_code
 
 // win
-// cd build
-// ."C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" ..
+// cd win
+// ."C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" .
 // VisualStudioでビルド
 
 // mac
@@ -47,7 +49,22 @@ int main()
     appInfo.pEngineName = "NoEngine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.apiVersion = vk::ApiVersion11; // Vulkan1.1以降に導入された関数を使うために変更
-    
+
+    if (!glfwInit())
+    {
+        return EXIT_FAILURE;
+    }
+
+    uint32_t requiredExtensionsCount;
+    const char** requiredExtensions = glfwGetRequiredInstanceExtensions(&requiredExtensionsCount);
+
+    LOG("GLFW Extensions");
+    for (int i = 0; i < requiredExtensionsCount; i++) 
+    {
+        LOG("----------------------------------------");
+        LOG(requiredExtensions[i]);
+    }
+
     // これに色々情報を乗っけることで
     // 例えばVulkanの拡張機能をオンにしたりだとかデバッグ情報を表示させるといったことができる
     // これはオプション的なもの
@@ -55,6 +72,8 @@ int main()
     instCreateInfo.pApplicationInfo = &appInfo;
     instCreateInfo.enabledLayerCount = std::size(requiredLayers);
     instCreateInfo.ppEnabledLayerNames = requiredLayers;
+    instCreateInfo.enabledExtensionCount = requiredExtensionsCount;
+    instCreateInfo.ppEnabledExtensionNames = requiredExtensions;
 
 #ifdef VULKAN_TEST_MAC
     instCreateInfo.enabledExtensionCount = std::size(requiredInstanceExtentions);
@@ -62,10 +81,38 @@ int main()
     instCreateInfo.flags |= vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
 #endif
 
+    const uint32_t screenWidth = 640;
+    const uint32_t screenHeight = 480;
+
     // Vulkanインスタンスを作ってから壊すまでの間に色々な処理を書いていく
     // Vulkanを使う場合、全ての機能はこのインスタンスを介して利用する
     vk::UniqueInstance instancePtr = vk::createInstanceUnique(instCreateInfo);
     vk::Instance instance = instancePtr.get();
+
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+
+    GLFWwindow* window;
+    window = glfwCreateWindow(screenWidth, screenHeight, "GLFW Test Window", NULL, NULL);
+    if (!window) 
+    {
+        const char* err;
+        glfwGetError(&err);
+        LOG(err);
+        glfwTerminate();
+        return EXIT_FAILURE;
+    }
+
+    VkSurfaceKHR c_surface;
+    VkResult result = glfwCreateWindowSurface(instance, window, nullptr, &c_surface);
+    if (result != VK_SUCCESS) 
+    {
+        const char* err;
+        glfwGetError(&err);
+        LOG(err);
+        glfwTerminate();
+        return EXIT_FAILURE;
+    }
+    vk::UniqueSurfaceKHR surface = vk::UniqueSurfaceKHR(c_surface, instance);
 
     // GPUが複数あるなら頼む相手をまず選ぶ必要がある
     // GPUの型式などによってサポートしている機能とサポートしていない機能があったりするため、
@@ -191,11 +238,6 @@ int main()
     // キューは論理デバイス(vk::Device)の getQueue メソッドで取得できる
     // 第1引数がキューファミリのインデックス、第2引数が取得したいキューのキューファミリ内でのインデックス
     vk::Queue graphicsQueue = device.getQueue(graphicsQueueFamilyIndex, 0);
-
-    // これから行う描画処理はメモリの中の話とはいえ、絵を描くキャンバスにあたるものが必要
-    // とりあえず幅と高さを決める
-    const uint32_t screenWidth = 640;
-    const uint32_t screenHeight = 480;
 
     // Vulkanにおいて画像は vk::Image というオブジェクトで表される
     // imageType には画像の次元を指定する
