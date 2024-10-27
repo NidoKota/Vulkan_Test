@@ -11,17 +11,9 @@
 
 using namespace Vulkan_Test;
 
-const char* requiredLayers[] = 
+std::vector<const char*> requiredLayers = 
 { 
     "VK_LAYER_KHRONOS_validation" 
-};
-const char* requiredInstanceExtentions[] = 
-{ 
-    vk::KHRPortabilityEnumerationExtensionName
-};
-const char* requiredDeviceExtentions[] = 
-{
-    vk::KHRPortabilitySubsetExtensionName
 };
 
 // https://chaosplant.tech/do/vulkan/
@@ -55,39 +47,33 @@ int main()
         return EXIT_FAILURE;
     }
 
-    uint32_t requiredExtensionsCount;
-    const char** requiredExtensions = glfwGetRequiredInstanceExtensions(&requiredExtensionsCount);
-
     // これに色々情報を乗っけることで
     // 例えばVulkanの拡張機能をオンにしたりだとかデバッグ情報を表示させるといったことができる
     // これはオプション的なもの
     vk::InstanceCreateInfo instCreateInfo;
     instCreateInfo.pApplicationInfo = &appInfo;
 
-    instCreateInfo.enabledLayerCount = std::size(requiredLayers);
-    instCreateInfo.ppEnabledLayerNames = requiredLayers;
+    uint32_t requiredExtensionsCount;
+    const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&requiredExtensionsCount);
+    std::vector<const char*> requiredExtensions = std::vector<const char*>(requiredExtensionsCount);
+    std::memcpy(&*requiredExtensions.begin(), glfwExtensions, sizeof(const char*) * requiredExtensionsCount);
 
-#ifdef _WIN32
-    instCreateInfo.enabledExtensionCount = requiredExtensionsCount;
-    instCreateInfo.ppEnabledExtensionNames = requiredExtensions;
-#endif
-
+    std::vector<const char*> devRequiredExtensions = 
+    {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME 
+    };
+    std::copy(devRequiredExtensions.begin(), devRequiredExtensions.end(), std::back_inserter(requiredExtensions));
+    
 #ifdef __APPLE__
-    instCreateInfo.enabledExtensionCount = requiredExtensionsCount + std::size(requiredInstanceExtentions);
-
-    char** appleRequiredExtensions = new char*[instCreateInfo.enabledExtensionCount];
-
-    size_t size1 = sizeof(char*) * requiredExtensionsCount;
-    std::memcpy(appleRequiredExtensions, requiredExtensions, size1);
-
-    void* dst = static_cast<void*>(&appleRequiredExtensions[requiredExtensionsCount]);
-    void* src = static_cast<void*>(&requiredInstanceExtentions);
-    size_t size2 = sizeof(char*) * std::size(requiredInstanceExtentions);
-    std::memcpy(dst, src, size2);
-
-    instCreateInfo.ppEnabledExtensionNames = appleRequiredExtensions;
-    instCreateInfo.flags |= vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
+    std::vector<const char*> appleRrequiredExtentions = 
+    { 
+        vk::KHRPortabilityEnumerationExtensionName
+    };
+    std::copy(appleRrequiredExtentions.begin(), appleRrequiredExtentions.end(), std::back_inserter(requiredExtensions));
 #endif
+
+    instCreateInfo.enabledExtensionCount = requiredExtensions.size();
+    instCreateInfo.ppEnabledExtensionNames = &*requiredExtensions.begin();
 
     LOG("Extensions");
     for (int i = 0; i < instCreateInfo.enabledExtensionCount; i++) 
@@ -96,8 +82,9 @@ int main()
         LOG(instCreateInfo.ppEnabledExtensionNames[i]);
     }
 
-    const uint32_t screenWidth = 640;
-    const uint32_t screenHeight = 480;
+#ifdef __APPLE__
+    instCreateInfo.flags |= vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
+#endif
 
     // Vulkanインスタンスを作ってから壊すまでの間に色々な処理を書いていく
     // Vulkanを使う場合、全ての機能はこのインスタンスを介して利用する
@@ -105,6 +92,9 @@ int main()
     vk::Instance instance = instancePtr.get();
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+
+    const uint32_t screenWidth = 640;
+    const uint32_t screenHeight = 480;
 
     GLFWwindow* window;
     window = glfwCreateWindow(screenWidth, screenHeight, "GLFW Test Window", NULL, NULL);
@@ -168,6 +158,8 @@ int main()
 
         for (size_t j = 0; j < extProps.size(); j++) 
         {
+            // enumerateDeviceExtensionPropertiesメソッドでその物理デバイスがサポートしている拡張機能の一覧を取得
+            // その中にスワップチェーンの拡張機能の名前が含まれていなければそのデバイスは使わない
             if (std::string_view(extProps[j].extensionName.data()) == VK_KHR_SWAPCHAIN_EXTENSION_NAME) 
             {
                 supportsSwapchainExtension = true;
@@ -252,15 +244,18 @@ int main()
     // インスタンスを作成するときにvk::InstanceCreateInfo構造体を使ったのと同じように、
     // 論理デバイス作成時にもvk::DeviceCreateInfo構造体の中に色々な情報を含めることができる
     vk::DeviceCreateInfo devCreateInfo;
-    devCreateInfo.enabledLayerCount = std::size(requiredLayers);
-    devCreateInfo.ppEnabledLayerNames = requiredLayers;
+    devCreateInfo.enabledLayerCount = requiredLayers.size();
+    devCreateInfo.ppEnabledLayerNames = &*requiredLayers.begin();
     devCreateInfo.queueCreateInfoCount = std::size(queueCreateInfo);
     devCreateInfo.pQueueCreateInfos = queueCreateInfo;
 
-#ifdef VULKAN_TEST_MAC
-    devCreateInfo.enabledExtensionCount = std::size(requiredDeviceExtentions);
-    devCreateInfo.ppEnabledExtensionNames = requiredDeviceExtentions;
+    // スワップチェーンは拡張機能なので、機能を有効化する必要がある
+    // スワップチェーンは「デバイスレベル」の拡張機能
+#ifdef __APPLE__
+
 #endif
+    devCreateInfo.enabledExtensionCount = devRequiredExtensions.size();
+    devCreateInfo.ppEnabledExtensionNames = &*devRequiredExtensions.begin();
 
     // vk::Instanceにはそれに対応するvk::UniqueInstanceが存在しましたが、
     // vk::PhysicalDeviceに対応するvk::UniquePhysicalDevice は存在しない
