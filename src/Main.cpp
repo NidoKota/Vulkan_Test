@@ -58,28 +58,43 @@ int main()
     uint32_t requiredExtensionsCount;
     const char** requiredExtensions = glfwGetRequiredInstanceExtensions(&requiredExtensionsCount);
 
-    LOG("GLFW Extensions");
-    for (int i = 0; i < requiredExtensionsCount; i++) 
-    {
-        LOG("----------------------------------------");
-        LOG(requiredExtensions[i]);
-    }
-
     // これに色々情報を乗っけることで
     // 例えばVulkanの拡張機能をオンにしたりだとかデバッグ情報を表示させるといったことができる
     // これはオプション的なもの
     vk::InstanceCreateInfo instCreateInfo;
     instCreateInfo.pApplicationInfo = &appInfo;
+
     instCreateInfo.enabledLayerCount = std::size(requiredLayers);
     instCreateInfo.ppEnabledLayerNames = requiredLayers;
+
+#ifdef _WIN32
     instCreateInfo.enabledExtensionCount = requiredExtensionsCount;
     instCreateInfo.ppEnabledExtensionNames = requiredExtensions;
+#endif
 
-#ifdef VULKAN_TEST_MAC
-    instCreateInfo.enabledExtensionCount = std::size(requiredInstanceExtentions);
-    instCreateInfo.ppEnabledExtensionNames = requiredInstanceExtentions;
+#ifdef __APPLE__
+    instCreateInfo.enabledExtensionCount = requiredExtensionsCount + std::size(requiredInstanceExtentions);
+
+    char** appleRequiredExtensions = new char*[instCreateInfo.enabledExtensionCount];
+
+    size_t size1 = sizeof(char*) * requiredExtensionsCount;
+    std::memcpy(appleRequiredExtensions, requiredExtensions, size1);
+
+    void* dst = static_cast<void*>(&appleRequiredExtensions[requiredExtensionsCount]);
+    void* src = static_cast<void*>(&requiredInstanceExtentions);
+    size_t size2 = sizeof(char*) * std::size(requiredInstanceExtentions);
+    std::memcpy(dst, src, size2);
+
+    instCreateInfo.ppEnabledExtensionNames = appleRequiredExtensions;
     instCreateInfo.flags |= vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
 #endif
+
+    LOG("Extensions");
+    for (int i = 0; i < instCreateInfo.enabledExtensionCount; i++) 
+    {
+        LOG("----------------------------------------");
+        LOG(instCreateInfo.ppEnabledExtensionNames[i]);
+    }
 
     const uint32_t screenWidth = 640;
     const uint32_t screenHeight = 480;
@@ -112,6 +127,7 @@ int main()
         glfwTerminate();
         return EXIT_FAILURE;
     }
+
     vk::UniqueSurfaceKHR surface = vk::UniqueSurfaceKHR(c_surface, instance);
 
     // GPUが複数あるなら頼む相手をまず選ぶ必要がある
@@ -129,13 +145,14 @@ int main()
     }
 
     // デバイスとキューの検索   
-    bool foundGraphicsQueue = false;
     uint32_t graphicsQueueFamilyIndex;
     vk::PhysicalDevice physicalDevice;
+    bool existsSuitablePhysicalDevice = false;
     for (size_t i = 0; i < physicalDevices.size(); i++)
     {
         std::vector<vk::QueueFamilyProperties> queueProps = physicalDevices[i].getQueueFamilyProperties();
 
+        bool foundGraphicsQueue = false;
         for (size_t j = 0; j < queueProps.size(); j++)
         {
             if (!(queueProps[j].queueFlags & vk::QueueFlagBits::eGraphics)) continue;
@@ -146,13 +163,27 @@ int main()
             break;
         }
 
-        if (foundGraphicsQueue)
+        std::vector<vk::ExtensionProperties> extProps = physicalDevices[i].enumerateDeviceExtensionProperties();
+        bool supportsSwapchainExtension = false;
+
+        for (size_t j = 0; j < extProps.size(); j++) 
         {
+            if (std::string_view(extProps[j].extensionName.data()) == VK_KHR_SWAPCHAIN_EXTENSION_NAME) 
+            {
+                supportsSwapchainExtension = true;
+                break;
+            }
+        }
+
+        if (foundGraphicsQueue && supportsSwapchainExtension) 
+        {
+            physicalDevice = physicalDevices[i];
+            existsSuitablePhysicalDevice = true;
             break;
         }
     }
 
-    if (foundGraphicsQueue)
+    if (existsSuitablePhysicalDevice)
     {
         vk::PhysicalDeviceProperties2 props = physicalDevice.getProperties2();
         LOG("----------------------------------------");
