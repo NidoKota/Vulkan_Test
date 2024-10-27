@@ -123,6 +123,9 @@ int main()
         vk::PhysicalDeviceProperties2 props = physicalDevice.getProperties2();
         LOG("----------------------------------------");
         LOG(props.properties.deviceName);
+        LOG("deviceID: " << props.properties.deviceID);
+        LOG("vendorID: " << props.properties.vendorID);
+        LOG("deviceType: " << to_string(props.properties.deviceType));
     }
 
     // デバイスとキューの検索   
@@ -290,11 +293,11 @@ int main()
     vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
     LOG("----------------------------------------");
     LOG("memory type count: " << memProps.memoryTypeCount);
+    LOG("memory heap count: " << memProps.memoryHeapCount);
     for (size_t i = 0; i < memProps.memoryTypeCount; i++)
     {
         LOG("----------------------------------------");
         LOG("memory type index: " << i);
-        LOG("heap index: " << memProps.memoryTypes[i].heapIndex);
         LOG(to_string(memProps.memoryTypes[i].propertyFlags));
     }
 
@@ -320,7 +323,9 @@ int main()
     bool foundSuitableMemoryType = false;
     for (size_t i = 0; i < memProps.memoryTypeCount; i++)
     {
-        if (imgMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible))
+        // あとで画像として出力しやすいようにホスト可視のメモリを選択する
+        if (imgMemReq.memoryTypeBits & (1 << i)
+         && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible))
         {
             imgMemAllocInfo.memoryTypeIndex = i;
             foundSuitableMemoryType = true;
@@ -683,7 +688,17 @@ int main()
     // キューのwaitIdleメソッドを呼ぶと、その段階でキューに入っているコマンドが全て実行完了してキューが空になるまで待つことができる
     graphicsQueue.waitIdle();
 
+    // データはメインメモリではなくGPUの中にある
+    // つまりこのままではアプリケーションからアクセスできない
+    // よって、アプリケーション側のアドレス空間上にマップして、メインのプログラムから見れるようにする必要がある
+    //
+    // GPU上のメモリには種類があり、適切に選択する必要がある
+    // 実はGPU上のメモリには、GPUを操作しているホストからアクセスできるものとアクセスできないものがある
+    // そこで、メモリを確保するところで「目的のイメージにバインドできるメモリ」であるだけでなく「ホスト側から見えるメモリ」であるものを選択する必要があります。
     void* imgData = device.mapMemory(imgMem.get(), 0, imgMemReq.size);
+
+    // 引数はそれぞれファイル名、幅、高さ、1画素当たりのバイト数、データ
+    // 第4引数が4のとき、それぞれの画素はRGBAをこの順でそれぞれ1バイト(符号なし8ビット)で表す
     stbi_write_bmp("img.bmp", screenWidth, screenHeight, 4, imgData);
     device.unmapMemory(imgMem.get());
 
