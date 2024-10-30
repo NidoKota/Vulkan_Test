@@ -847,14 +847,14 @@ int main()
         vk::ResultValue acquireImgResult = device.acquireNextImageKHR(swapchain.get(), 1'000'000'000, {}, swapchainImgFence.get());
         if (acquireImgResult.result != vk::Result::eSuccess) 
         {
-            LOG("次フレームの取得に失敗しました。");
+            LOG("Failed to get next frame");
             return EXIT_FAILURE;
         }
         uint32_t imgIndex = acquireImgResult.value;
     
         if (device.waitForFences({ swapchainImgFence.get() }, VK_TRUE, 1'000'000'000) != vk::Result::eSuccess)
         {
-            LOG("次フレームの取得に失敗しました。");
+            LOG("Failed to get next frame");
             return EXIT_FAILURE;
         }
     
