@@ -7,7 +7,7 @@
 #include <fstream>
 #include <filesystem>
 #include "../include/Utility.hpp"
-#include "../include/stb/stb_image_write.h"
+// #include "../include/stb/stb_image_write.h"
 
 using namespace Vulkan_Test;
 
@@ -56,7 +56,7 @@ int main()
 #ifdef __APPLE__
     std::vector<const char*> appleRrequiredExtentions = 
     { 
-        vk::KHRPortabilityEnumerationExtensionName
+        vk::KHRPortabilityEnumerationExtensionName,
     };
     std::copy(appleRrequiredExtentions.begin(), appleRrequiredExtentions.end(), std::back_inserter(insRequiredExtensions));
 #endif
@@ -95,6 +95,15 @@ int main()
         glfwTerminate();
         return EXIT_FAILURE;
     }
+
+    int width;
+    int height;
+    glfwGetWindowSize(window, &width, &height);
+
+    LOG("width " << width << ", height " << height);
+
+    glfwGetFramebufferSize(window, &width, &height);
+    LOG("width " << width << ", height " << height);
 
     // 表示する先の画面は「サーフェス」というオブジェクトで抽象化されている
     // ウィンドウやスクリーンなど、「表示する先として使える何か」は全てサーフェスという同じ種類のオブジェクトで表され、統一的に扱うことができる
@@ -137,7 +146,8 @@ int main()
         bool foundGraphicsQueue = false;
         for (size_t j = 0; j < queueProps.size(); j++)
         {
-            if (!(queueProps[j].queueFlags & vk::QueueFlagBits::eGraphics)) continue;
+            // グラフィックス機能に加えてサーフェスへのプレゼンテーションもサポートしているキューを厳選
+            if (!(queueProps[j].queueFlags & vk::QueueFlagBits::eGraphics) || !physicalDevices[i].getSurfaceSupportKHR(j, surface)) continue;
             
             foundGraphicsQueue = true;
             graphicsQueueFamilyIndex = j;
@@ -266,6 +276,8 @@ int main()
     vk::UniqueDevice devicePtr = physicalDevice.createDeviceUnique(devCreateInfo);
     vk::Device device = devicePtr.get();
 
+    vk::Queue graphicsQueue = device.getQueue(graphicsQueueFamilyIndex, 0);
+
     // 一般的なコンピュータは、アニメーションを描画・表示する際に「描いている途中」が見えないようにするため、
     // 2枚以上のキャンバスを用意して、1枚を使って現在のフレームを表示させている裏で別の1枚に次のフレームを描画する、という仕組みを採用している
     // スワップチェーンは、一言で言えば「画面に表示されようとしている画像の連なり」
@@ -284,6 +296,7 @@ int main()
     // https://vulkan-tutorial.com/
     // の記述に従って最小値+1を指定する
     swapchainCreateInfo.minImageCount = surfaceCapabilities.minImageCount + 1;
+    LOG("swapchain minImageCount" << swapchainCreateInfo.minImageCount);
     // imageFormatやimageColorSpaceなどには、スワップチェーンが取り扱う画像の形式などを指定する
     // しかしこれらに指定できる値はサーフェスとデバイスの事情によって制限されるものであり、自由に決めることができるものではない
     // ここに指定する値は、必ずgetSurfaceFormatsKHRが返した配列に含まれる組み合わせでなければならない
@@ -293,6 +306,7 @@ int main()
     // getSurfaceCapabilitiesKHRで得られたminImageExtent(最小値)とmaxImageExtent(最大値)の間でなければならない
     // currentExtentで現在のサイズが得られるため、それを指定
     swapchainCreateInfo.imageExtent = surfaceCapabilities.currentExtent;
+    LOG("swapchainCreateInfo " << swapchainCreateInfo.imageExtent.width << ", " << swapchainCreateInfo.imageExtent.height);
     swapchainCreateInfo.imageArrayLayers = 1;
     swapchainCreateInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
     swapchainCreateInfo.imageSharingMode = vk::SharingMode::eExclusive;
@@ -598,12 +612,12 @@ int main()
     viewports[0].y = 0.0;
     viewports[0].minDepth = 0.0;
     viewports[0].maxDepth = 1.0;
-    viewports[0].width = screenWidth;
-    viewports[0].height = screenHeight;
+    viewports[0].width = surfaceCapabilities.currentExtent.width;
+    viewports[0].height = surfaceCapabilities.currentExtent.height;
 
     vk::Rect2D scissors[1];
     scissors[0].offset = vk::Offset2D(0, 0);
-    scissors[0].extent = vk::Extent2D(screenWidth, screenHeight);
+    scissors[0].extent = surfaceCapabilities.currentExtent;
 
     vk::PipelineViewportStateCreateInfo viewportState;
     viewportState.viewportCount = 1;
@@ -800,6 +814,103 @@ int main()
     // cmdBufAllocInfo.level = vk::CommandBufferLevel::ePrimary;
     // std::vector<vk::UniqueCommandBuffer> cmdBufs = device.allocateCommandBuffersUnique(cmdBufAllocInfo);
 
+    vk::FenceCreateInfo fenceCreateInfo;
+    vk::UniqueFence swapchainImgFence = device.createFenceUnique(fenceCreateInfo);
+
+    while (!glfwWindowShouldClose(window)) 
+    {
+        glfwPollEvents();
+        
+        device.resetFences({ swapchainImgFence.get() });
+    
+        // スワップチェーンを利用する私たちの側としては「次に表示される予定のイメージ」に描画を行いたい
+        // そこで「次に描画を行うべきイメージ」を、論理デバイスのacquireNextImageKHRメソッドで取得
+        // 前回スワップチェーンのイメージを配列として取得したが、その何番目のイメージという番号の形で手に入る
+        // このメソッドは、次に描画するべきイメージを教えてくれるだけでなく「描画されてもいいように準備する処理」なども含んでいるため、
+        // スワップチェーンのイメージに描画する前には必ず呼ぶ必要がある
+        //
+        // 正確には「描画された後表示されてもいいように準備する処理」
+        //
+        // acquireNextImageKHRの第二引数はタイムアウト時間(最大待ち時間)
+        // 単位はナノ秒で、ここでは1'000'000'000ナノ秒=1秒としている
+        // UINT64_MAXを指定した場合は無制限に待つ
+
+        // もう一つ重要なのが、「フェンス」を使って同期処理を行っているところ
+        // 実はこのacquireNextImageKHR、ただちに描画の準備を整えてくれるわけではない
+        // キューにコマンドを送信した時などと同じように、少し待たないと描画の準備を完了してくれない
+        // いわゆる非同期処理
+        // (イメージのインデックスだけ返り値として先に返してくれる)
+
+        // コマンド送信の時はwaitIdle()などを使っていましたが今回はキューの処理ではないので、
+        // フェンスを利用して描画の準備が終わるまで待機している
+
+        vk::ResultValue acquireImgResult = device.acquireNextImageKHR(swapchain.get(), 1'000'000'000, {}, swapchainImgFence.get());
+        if (acquireImgResult.result != vk::Result::eSuccess) 
+        {
+            LOG("次フレームの取得に失敗しました。");
+            return EXIT_FAILURE;
+        }
+        uint32_t imgIndex = acquireImgResult.value;
+    
+        if (device.waitForFences({ swapchainImgFence.get() }, VK_TRUE, 1'000'000'000) != vk::Result::eSuccess)
+        {
+            LOG("次フレームの取得に失敗しました。");
+            return EXIT_FAILURE;
+        }
+    
+        // コマンドバッファのリセット
+        cmdBufs[0]->reset();
+    
+        // コマンドの記録
+        vk::CommandBufferBeginInfo cmdBeginInfo;
+        cmdBufs[0]->begin(cmdBeginInfo);
+        
+        vk::ClearValue clearVal[1];
+        clearVal[0].color.float32[0] = 0.0f;
+        clearVal[0].color.float32[1] = 0.0f;
+        clearVal[0].color.float32[2] = 0.0f;
+        clearVal[0].color.float32[3] = 1.0f;
+
+        vk::RenderPassBeginInfo renderpassBeginInfo;
+        renderpassBeginInfo.renderPass = renderpass.get();
+        renderpassBeginInfo.framebuffer = swapchainFramebufs[imgIndex].get();
+        renderpassBeginInfo.renderArea = vk::Rect2D({ 0,0 }, surfaceCapabilities.currentExtent);
+        renderpassBeginInfo.clearValueCount = 1;
+        renderpassBeginInfo.pClearValues = clearVal;
+
+        cmdBufs[0]->beginRenderPass(renderpassBeginInfo, vk::SubpassContents::eInline);
+
+        cmdBufs[0]->bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.get());
+        cmdBufs[0]->draw(3, 1, 0, 0);
+    
+        cmdBufs[0]->endRenderPass();
+
+        cmdBufs[0]->end();
+        
+        // コマンドバッファの送信
+        vk::CommandBuffer submitCmdBuf[1] = { cmdBufs[0].get() };
+        vk::SubmitInfo submitInfo;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = submitCmdBuf;
+        graphicsQueue.submit({ submitInfo }, nullptr);
+        graphicsQueue.waitIdle();
+    
+        // 表示処理(後で説明)
+        vk::PresentInfoKHR presentInfo;
+
+        auto presentSwapchains = { swapchain.get() };
+        auto imgIndices = { imgIndex };
+        
+        presentInfo.swapchainCount = presentSwapchains.size();
+        presentInfo.pSwapchains = presentSwapchains.begin();
+        presentInfo.pImageIndices = imgIndices.begin();
+        
+        graphicsQueue.presentKHR(presentInfo);
+        
+        graphicsQueue.waitIdle();
+    }
+
+    glfwTerminate();
 
     // // レンダーパスの開始と終了を指示するコマンドを送る
     // // Vulkanにおける描画処理は必ずレンダーパスの枠組みで行う必要がある
@@ -850,47 +961,47 @@ int main()
     // }
     // cmdBufs[0]->end();
 
-    // コマンドの記録が終わったらそれをキューに送信
-    // vk::SubmitInfo構造体にコマンドバッファの送信に関わる情報を指定する
-    // commandBufferCountには送信するコマンドバッファの数
-    // pCommandBuffersには送信するコマンドバッファの配列へのポインタを指定
-    vk::CommandBuffer submitCmdBuf[1] = { cmdBufs[0].get() };
-    vk::SubmitInfo submitInfo;
-    submitInfo.commandBufferCount = std::size(submitCmdBuf);
-    submitInfo.pCommandBuffers = submitCmdBuf;
+    // // コマンドの記録が終わったらそれをキューに送信
+    // // vk::SubmitInfo構造体にコマンドバッファの送信に関わる情報を指定する
+    // // commandBufferCountには送信するコマンドバッファの数
+    // // pCommandBuffersには送信するコマンドバッファの配列へのポインタを指定
+    // vk::CommandBuffer submitCmdBuf[1] = { cmdBufs[0].get() };
+    // vk::SubmitInfo submitInfo;
+    // submitInfo.commandBufferCount = std::size(submitCmdBuf);
+    // submitInfo.pCommandBuffers = submitCmdBuf;
 
-    // キューは論理デバイス(vk::Device)の getQueue メソッドで取得できる
-    // 第1引数がキューファミリのインデックス、第2引数が取得したいキューのキューファミリ内でのインデックス
-    vk::Queue graphicsQueue = device.getQueue(graphicsQueueFamilyIndex, 0);
+    // // キューは論理デバイス(vk::Device)の getQueue メソッドで取得できる
+    // // 第1引数がキューファミリのインデックス、第2引数が取得したいキューのキューファミリ内でのインデックス
+    // vk::Queue graphicsQueue = device.getQueue(graphicsQueueFamilyIndex, 0);
 
-    // 送信はvk::Queueのsubmitメソッドで行う
-    // 第2引数は現在nullptrにしているが、本来はフェンスというものを指定することができる
-    // こうしてsubmitでGPUに命令を送ることが出来るが、あくまで「送る」だけである
-    // キューに仕事を詰め込むだけであるため、submitから処理が返ってきた段階で送った命令が完了されているとは限らない
-    std::vector<vk::SubmitInfo> submits;
-    submits.push_back(submitInfo);
-    graphicsQueue.submit(submits, nullptr);
+    // // 送信はvk::Queueのsubmitメソッドで行う
+    // // 第2引数は現在nullptrにしているが、本来はフェンスというものを指定することができる
+    // // こうしてsubmitでGPUに命令を送ることが出来るが、あくまで「送る」だけである
+    // // キューに仕事を詰め込むだけであるため、submitから処理が返ってきた段階で送った命令が完了されているとは限らない
+    // std::vector<vk::SubmitInfo> submits;
+    // submits.push_back(submitInfo);
+    // graphicsQueue.submit(submits, nullptr);
 
-    // 実用的なプログラムを作るためには、「依頼した処理が終わるまで待つ」方法を知る必要がある
-    // これに必要なのが「セマフォ」や「フェンス」
-    // とりあえずここでは、単純に「キューが空になるまで待つ」方法を書く
-    // 
-    // キューのwaitIdleメソッドを呼ぶと、その段階でキューに入っているコマンドが全て実行完了してキューが空になるまで待つことができる
-    graphicsQueue.waitIdle();
+    // // 実用的なプログラムを作るためには、「依頼した処理が終わるまで待つ」方法を知る必要がある
+    // // これに必要なのが「セマフォ」や「フェンス」
+    // // とりあえずここでは、単純に「キューが空になるまで待つ」方法を書く
+    // // 
+    // // キューのwaitIdleメソッドを呼ぶと、その段階でキューに入っているコマンドが全て実行完了してキューが空になるまで待つことができる
+    // graphicsQueue.waitIdle();
 
-    // データはメインメモリではなくGPUの中にある
-    // つまりこのままではアプリケーションからアクセスできない
-    // よって、アプリケーション側のアドレス空間上にマップして、メインのプログラムから見れるようにする必要がある
-    //
-    // GPU上のメモリには種類があり、適切に選択する必要がある
-    // 実はGPU上のメモリには、GPUを操作しているホストからアクセスできるものとアクセスできないものがある
-    // そこで、メモリを確保するところで「目的のイメージにバインドできるメモリ」であるだけでなく「ホスト側から見えるメモリ」であるものを選択する必要があります。
-    void* imgData = device.mapMemory(imgMem.get(), 0, imgMemReq.size);
+    // // データはメインメモリではなくGPUの中にある
+    // // つまりこのままではアプリケーションからアクセスできない
+    // // よって、アプリケーション側のアドレス空間上にマップして、メインのプログラムから見れるようにする必要がある
+    // //
+    // // GPU上のメモリには種類があり、適切に選択する必要がある
+    // // 実はGPU上のメモリには、GPUを操作しているホストからアクセスできるものとアクセスできないものがある
+    // // そこで、メモリを確保するところで「目的のイメージにバインドできるメモリ」であるだけでなく「ホスト側から見えるメモリ」であるものを選択する必要があります。
+    // void* imgData = device.mapMemory(imgMem.get(), 0, imgMemReq.size);
 
-    // 引数はそれぞれファイル名、幅、高さ、1画素当たりのバイト数、データ
-    // 第4引数が4のとき、それぞれの画素はRGBAをこの順でそれぞれ1バイト(符号なし8ビット)で表す
-    stbi_write_bmp("img.bmp", screenWidth, screenHeight, 4, imgData);
-    device.unmapMemory(imgMem.get());
+    // // 引数はそれぞれファイル名、幅、高さ、1画素当たりのバイト数、データ
+    // // 第4引数が4のとき、それぞれの画素はRGBAをこの順でそれぞれ1バイト(符号なし8ビット)で表す
+    // stbi_write_bmp("img.bmp", screenWidth, screenHeight, 4, imgData);
+    // device.unmapMemory(imgMem.get());
 
     return EXIT_SUCCESS;
 }
