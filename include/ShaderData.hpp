@@ -105,12 +105,6 @@ std::shared_ptr<vk::UniqueDeviceMemory> writeVertexBuffer(vk::UniqueDevice& devi
     // 頂点のデータをメモリにコピーする
     std::memcpy(vertexBufMem, vertices.data(), sizeof(Vertex) * vertices.size());
 
-    for (size_t i = 0; i < 3; i++)
-    {
-        Vertex& pv = ((Vertex*)vertexBufMem)[i];
-        LOG("pv:" << i << " x:" << pv.x << " y:" << pv.y);
-    }
-
     // 書き込んだら flushMappedMemoryRangesメソッドを呼ぶことで書き込んだ内容がデバイスメモリに反映する
     // マッピングされたメモリはあくまで仮想的にデバイスメモリと対応付けられているだけで、「同期しておけよ」と念をおさないとデータが同期されない可能性がある
     vk::MappedMemoryRange flushMemoryRange;
@@ -122,11 +116,7 @@ std::shared_ptr<vk::UniqueDeviceMemory> writeVertexBuffer(vk::UniqueDevice& devi
     device.get().flushMappedMemoryRanges({ flushMemoryRange });
     // 作業が終わった後はunmapMemoryできちんと後片付けをします。
     device.get().unmapMemory(result->get());
-
-    LOG("vertices.size() " << vertices.size());
-    LOG("sizeof(Vertex) " << sizeof(Vertex));
-    LOG("flushMemoryRange.size " << flushMemoryRange.size);
-
+    
     return result;
 }
 
