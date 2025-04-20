@@ -1,4 +1,5 @@
 #include <iostream>
+#include <memory>
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
 #include "../include/Utility.hpp"
@@ -113,8 +114,7 @@ int main()
     fenceCreateInfo.flags = vk::FenceCreateFlagBits::eSignaled;
     vk::UniqueFence imgRenderedFence = device->get().createFenceUnique(fenceCreateInfo);
 
-    // while (!glfwWindowShouldClose(window.get()))
-    do 
+    while (!glfwWindowShouldClose(window.get()))
     {
         glfwPollEvents();
         
@@ -213,8 +213,6 @@ int main()
             return EXIT_FAILURE;
         }
     }
-    while (false);
-    
 
     graphicsQueue.waitIdle();
     glfwTerminate();
