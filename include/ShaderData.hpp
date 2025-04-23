@@ -7,18 +7,26 @@
 
 using namespace Vulkan_Test;
 
-struct Vertex 
-{
+struct Vec2 {
     float x, y;
 };
 
+struct Vec3 {
+    float x, y, z;
+};
+
+struct Vertex {
+    Vec2 pos;
+    Vec3 color;
+};
+
 std::vector<Vertex> vertices = {
-    Vertex{-0.5f, -0.5f },
-    Vertex{ 0.5f,  0.5f },
-    Vertex{-0.5f,  0.5f },
-    Vertex{ 0.5f,  0.5f },
-    Vertex{-0.5f, -0.5f },
-    Vertex{ 0.5f, -0.5f },
+    Vertex{ Vec2{-0.5f, -0.5f }, Vec3{ 0.0, 0.0, 1.0 } },
+    Vertex{ Vec2{ 0.5f,  0.5f }, Vec3{ 0.0, 1.0, 0.0 } },
+    Vertex{ Vec2{-0.5f,  0.5f }, Vec3{ 1.0, 0.0, 0.0 } },
+    Vertex{ Vec2{ 0.5f,  0.5f }, Vec3{ 0.0, 1.0, 0.0 } },
+    Vertex{ Vec2{-0.5f, -0.5f }, Vec3{ 0.0, 0.0, 1.0 } },
+    Vertex{ Vec2{ 0.5f, -0.5f }, Vec3{ 1.0, 1.0, 1.0 } },
 };
 
 std::shared_ptr<vk::UniqueBuffer> getVertexBuffer(vk::UniqueDevice& device)
@@ -187,12 +195,18 @@ std::shared_ptr<std::vector<vk::VertexInputAttributeDescription>> getVertexInput
     // ちなみにfloat型の3次元ベクトルを渡す際にはeR32G32B32Sfloatとか指定する。ここでもRGBの文字に深い意味はない。
     // 色のデータを渡すにしろ座標データを渡すにしろこういう名前の値を指定する。違和感があるかもしれないが、こういうものなので仕方ない。
     // offsetは頂点データのどの位置からデータを取り出すかを示す値。今回は1つしかアトリビュートが無いので0を指定しているが、複数のアトリビュートがある場合にはとても重要なものである。
-    vk::VertexInputAttributeDescription vertexInputDescription;
-    vertexInputDescription.binding = 0;
-    vertexInputDescription.location = 0;
-    vertexInputDescription.format = vk::Format::eR32G32Sfloat;
-    vertexInputDescription.offset = 0;
+    (*result).push_back(vk::VertexInputAttributeDescription());
+    (*result).push_back(vk::VertexInputAttributeDescription());
 
-    (*result).push_back(vertexInputDescription);
+    (*result)[0].binding = 0;
+    (*result)[0].location = 0;
+    (*result)[0].format = vk::Format::eR32G32Sfloat;
+    (*result)[0].offset = offsetof(Vertex, pos);
+    
+    (*result)[1].binding = 0;
+    (*result)[1].location = 1;
+    (*result)[1].format = vk::Format::eR32G32B32Sfloat;
+    (*result)[1].offset = offsetof(Vertex, color);
+
     return result;
 }
