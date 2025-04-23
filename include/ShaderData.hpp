@@ -24,10 +24,10 @@ std::vector<Vertex> vertices = {
     Vertex{ Vec2{-0.5f, -0.5f }, Vec3{ 0.0, 0.0, 1.0 } },
     Vertex{ Vec2{ 0.5f,  0.5f }, Vec3{ 0.0, 1.0, 0.0 } },
     Vertex{ Vec2{-0.5f,  0.5f }, Vec3{ 1.0, 0.0, 0.0 } },
-    Vertex{ Vec2{ 0.5f,  0.5f }, Vec3{ 0.0, 1.0, 0.0 } },
-    Vertex{ Vec2{-0.5f, -0.5f }, Vec3{ 0.0, 0.0, 1.0 } },
     Vertex{ Vec2{ 0.5f, -0.5f }, Vec3{ 1.0, 1.0, 1.0 } },
 };
+
+std::vector<uint16_t> indices = { 0, 1, 2, 1, 0, 3 };
 
 std::shared_ptr<vk::UniqueBuffer> getVertexBuffer(vk::UniqueDevice& device)
 {
@@ -124,6 +124,49 @@ std::shared_ptr<vk::UniqueDeviceMemory> writeVertexBuffer(vk::UniqueDevice& devi
     device.get().flushMappedMemoryRanges({ flushMemoryRange });
     // 作業が終わった後はunmapMemoryできちんと後片付けをします。
     device.get().unmapMemory(result->get());
+    
+    return result;
+}
+
+std::shared_ptr<vk::UniqueDeviceMemory> writeIndexBuffer(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueBuffer& vertexBuf)
+{
+    std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
+
+    vk::BufferCreateInfo indexBufferCreateInfo;
+    indexBufferCreateInfo.size = sizeof(uint16_t) * indices.size();
+    indexBufferCreateInfo.usage = vk::BufferUsageFlagBits::eIndexBuffer;
+    indexBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
+    
+    vk::UniqueBuffer indexBuf = device.get().createBufferUnique(indexBufferCreateInfo);
+    
+    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
+
+    vk::MemoryRequirements indexBufMemReq = device.get().getBufferMemoryRequirements(indexBuf.get());
+        
+    vk::MemoryAllocateInfo indexBufMemAllocInfo;
+    indexBufMemAllocInfo.allocationSize = indexBufMemReq.size;
+    
+    bool suitableMemoryTypeFound = false;
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
+    {
+        if (indexBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible))
+        {
+            indexBufMemAllocInfo.memoryTypeIndex = i;
+            suitableMemoryTypeFound = true;
+            break;
+        }
+    }
+    if (!suitableMemoryTypeFound) 
+    {
+        std::cerr << "適切なメモリタイプが存在しません。" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    
+    *result = device.get().allocateMemoryUnique(indexBufMemAllocInfo);
+    
+    vk::UniqueDeviceMemory indexBufMemory = device.get().allocateMemoryUnique(indexBufMemAllocInfo);
+    
+    device.get().bindBufferMemory(indexBuf.get(), indexBufMemory.get(), 0);
     
     return result;
 }
