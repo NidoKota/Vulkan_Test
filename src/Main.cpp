@@ -1,4 +1,5 @@
 #include <iostream>
+#include <memory>
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
 #include "../include/Utility.hpp"

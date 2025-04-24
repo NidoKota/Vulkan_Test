@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+#include <memory>
 #include <vulkan/vulkan.hpp>
 #include <fstream>
 #include <filesystem>
