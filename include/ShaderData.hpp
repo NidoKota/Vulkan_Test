@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+#include <memory>
 #include <vulkan/vulkan.hpp>
 #include "Utility.hpp"
 #include "Debug.hpp"
@@ -31,6 +32,15 @@ std::vector<uint16_t> indices = { 0, 1, 2, 1, 0, 3 };
 
 std::shared_ptr<vk::UniqueBuffer> getVertexBuffer(vk::UniqueDevice& device)
 {
+    // バッファというのはデバイスメモリ上のデータ列を表すオブジェクト
+    // 何度も言うようにGPUから普通のメモリの内容は参照できない
+    // シェーダで使いたいデータがある場合、まずデバイスメモリに移す必要がある
+    // そしてそれはプログラムの上では「バッファに書き込む」「バッファに書き込んで転送する」という形になる
+    // 頂点座標のデータをシェーダに送るためのバッファを作成する
+    // いわゆる頂点バッファ
+    // size はバッファの大きさをバイト数で示すもの
+    // ここに例えば100という値を指定すれば、100バイトの大きさのバッファが作成できる
+    // ここでは前節で定義した構造体のバイト数をsizeof演算子で取得し、それにデータの数をかけている
     std::shared_ptr<vk::UniqueBuffer> result = std::make_shared<vk::UniqueBuffer>();
 
     // 次は実際に使われる頂点バッファの作成
@@ -41,7 +51,12 @@ std::shared_ptr<vk::UniqueBuffer> getVertexBuffer(vk::UniqueDevice& device)
     // あとでステージングバッファからデータを転送してくる
     vk::BufferCreateInfo vertexBufferCreateInfo;
     vertexBufferCreateInfo.size = sizeof(Vertex) * vertices.size();
+    // usage は作成するバッファの使い道を示すためのもの
+    // 今回のように頂点バッファを作る場合、上記のようにvk::BufferUsageFlagBits::eVertexBufferフラグを指定しなければならない
+    // 他にも場合によって様々なフラグを指定する必要があり、複数のフラグを指定することもある
     vertexBufferCreateInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst; // eTransferDstを追加
+    // sharingModeについては今のところは無視
+    // ここではvk::SharingMode::eExclusiveを指定
     vertexBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
     
     *result = device.get().createBufferUnique(vertexBufferCreateInfo);
@@ -50,6 +65,8 @@ std::shared_ptr<vk::UniqueBuffer> getVertexBuffer(vk::UniqueDevice& device)
 
 std::shared_ptr<vk::UniqueDeviceMemory> getVertexBufferMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueBuffer& vertexBuf)
 {
+    // 実際に使われる頂点バッファのデバイスメモリを確保する
+
     std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
 
     vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
@@ -76,6 +93,9 @@ std::shared_ptr<vk::UniqueDeviceMemory> getVertexBufferMemory(vk::UniqueDevice& 
     }
     
     *result = device.get().allocateMemoryUnique(vertexBufMemAllocInfo);
+    // デバイスメモリが確保出来たら bindBufferMemoryで結び付ける
+    // 第1引数は結びつけるバッファ、第2引数は結びつけるデバイスメモリ
+    // 第3引数は、確保したデバイスメモリのどこを(先頭から何バイト目以降を)使用するかを指定するもの
     device.get().bindBufferMemory(vertexBuf.get(), result->get(), 0);
     return result;
 }
@@ -86,20 +106,6 @@ std::shared_ptr<vk::UniqueBuffer> getStagingVertexBuffer(vk::UniqueDevice& devic
 
     vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
 
-    // バッファというのはデバイスメモリ上のデータ列を表すオブジェクト
-    // 何度も言うようにGPUから普通のメモリの内容は参照できない
-    // シェーダで使いたいデータがある場合、まずデバイスメモリに移す必要がある
-    // そしてそれはプログラムの上では「バッファに書き込む」「バッファに書き込んで転送する」という形になる
-    // 頂点座標のデータをシェーダに送るためのバッファを作成する
-    // いわゆる頂点バッファ
-    // size はバッファの大きさをバイト数で示すもの
-    // ここに例えば100という値を指定すれば、100バイトの大きさのバッファが作成できる
-    // ここでは前節で定義した構造体のバイト数をsizeof演算子で取得し、それにデータの数をかけている
-    // usage は作成するバッファの使い道を示すためのもの
-    // 今回のように頂点バッファを作る場合、上記のようにvk::BufferUsageFlagBits::eVertexBufferフラグを指定しなければならない
-    // 他にも場合によって様々なフラグを指定する必要があり、複数のフラグを指定することもある
-    // sharingModeについては今のところは無視
-    // ここではvk::SharingMode::eExclusiveを指定
     vk::BufferCreateInfo stagingBufferCreateInfo;
     stagingBufferCreateInfo.size = sizeof(Vertex) * vertices.size();
     stagingBufferCreateInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
@@ -123,7 +129,7 @@ std::shared_ptr<vk::UniqueDeviceMemory> getStagingVertexBufferMemory(vk::UniqueD
     bool suitableMemoryTypeFound = false;
     for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
     {
-        if (vertexBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible)) // デバイスローカルに変更
+        if (vertexBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible))
         {
             vertexBufMemAllocInfo.memoryTypeIndex = i;
             suitableMemoryTypeFound = true;
@@ -143,6 +149,9 @@ std::shared_ptr<vk::UniqueDeviceMemory> getStagingVertexBufferMemory(vk::UniqueD
 
 void writeStagingVertexBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& stagingVertexBufMem)
 {
+    // デバイスメモリに書き込むために、メモリマッピングというものをする
+    // これは操作したい対象のデバイスメモリを仮想的にアプリケーションのメモリ空間に対応付けることで操作出来るようにするもの
+    // 対象のデバイスメモリを直接操作するわけにはいかないのでこういう形になっている
     void* pStagingVertexBufMem = device.get().mapMemory(stagingVertexBufMem.get(), 0, sizeof(Vertex) * vertices.size());
 
     std::memcpy(pStagingVertexBufMem, vertices.data(), sizeof(Vertex) * vertices.size());
@@ -152,7 +161,11 @@ void writeStagingVertexBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& 
     flushMemoryRange.offset = 0;
     flushMemoryRange.size = sizeof(Vertex) * vertices.size();
     
+    // 書き込んだら flushMappedMemoryRangesメソッドを呼ぶことで書き込んだ内容がデバイスメモリに反映される
+    // マッピングされたメモリはあくまで仮想的にデバイスメモリと対応付けられているだけ
+    // 「同期しておけよ」と念をおさないとデータが同期されない可能性がある
     device.get().flushMappedMemoryRanges({ flushMemoryRange });
+    // 作業が終わった後はunmapMemoryできちんと後片付けをする
     device.get().unmapMemory(stagingVertexBufMem.get());
 }
 
@@ -164,6 +177,9 @@ void sendVertexBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Q
     // データの転送用に、コマンドバッファを作成するコードを別途追加する
     vk::CommandPoolCreateInfo tmpCmdPoolCreateInfo;
     tmpCmdPoolCreateInfo.queueFamilyIndex = queueFamilyIndex;
+    // vk::CommandPoolCreateFlagBits::eTransientフラグを指定
+    // これは比較的すぐに使ってすぐに役目を終えるコマンドバッファ用であることを意味するフラグ
+    // 必須ではないが指定しておくと内部的に最適化が起きる可能性がある
     tmpCmdPoolCreateInfo.flags = vk::CommandPoolCreateFlagBits::eTransient;
     vk::UniqueCommandPool tmpCmdPool = device->createCommandPoolUnique(tmpCmdPoolCreateInfo);
     
@@ -173,10 +189,11 @@ void sendVertexBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Q
     tmpCmdBufAllocInfo.level = vk::CommandBufferLevel::ePrimary;
     std::vector<vk::UniqueCommandBuffer> tmpCmdBufs = device->allocateCommandBuffersUnique(tmpCmdBufAllocInfo);
 
-    // 今までのコードと違う点として、コマンドプールにvk::CommandPoolCreateFlagBits::eTransientフラグを指定する
-    // これは比較的すぐに使ってすぐに役目を終えるコマンドバッファ用であることを意味するフラグ
-    // 必須ではないですが指定しておくと内部的に最適化が起きる可能性がある
-    // このコマンドバッファを使ってデータ転送の命令を飛ばす
+    // バッファ間でデータをコピーするには copyBuffer を使う
+    // そしてコピーするバッファやコピーする領域を指定するために vk::BufferCopy 構造体を使う
+    // srcOffsetは転送元バッファの先頭から何バイト目を読み込むというデータ位置、dstOffsetは転送先バッファの先頭から何バイト目に書き込むというデータ位置、sizeはデータサイズを表す
+    // memcpyの引数と似たような感じだと理解すると分かりやすい
+    // あとはキューに投げるだけ
     vk::BufferCopy bufCopy;
     bufCopy.srcOffset = 0;
     bufCopy.dstOffset = 0;
@@ -189,9 +206,6 @@ void sendVertexBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Q
     tmpCmdBufs[0]->copyBuffer(stagingBuf.get(), vertexBuf.get(), {bufCopy});
     tmpCmdBufs[0]->end();
 
-    // バッファ間でデータをコピーするには copyBuffer を使います。そしてコピーするバッファやコピーする領域を指定するために vk::BufferCopy 構造体を使います。
-    // srcOffsetは転送元バッファの先頭から何バイト目を読み込むというデータ位置、dstOffsetは転送先バッファの先頭から何バイト目に書き込むというデータ位置、sizeはデータサイズを表します。memcpyの引数と似たような感じだと理解すると分かりやすいかもしれません。
-    // あとはキューに投げるだけです。
     vk::CommandBuffer submitCmdBuf[1] = {tmpCmdBufs[0].get()};
     vk::SubmitInfo submitInfo;
     submitInfo.commandBufferCount = 1;
