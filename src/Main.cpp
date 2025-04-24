@@ -55,7 +55,18 @@ int main()
     std::shared_ptr<std::vector<vk::VertexInputAttributeDescription>> vertexInputDescription = getVertexInputDescription();
 
     std::shared_ptr<vk::UniqueBuffer> vertexBuf = getVertexBuffer(*device);
-    std::shared_ptr<vk::UniqueDeviceMemory> vertexBufMemory = writeVertexBuffer(*device, physicalDevice, *vertexBuf);
+    std::shared_ptr<vk::UniqueDeviceMemory> vertexBufMem = getVertexBufferMemory(*device, physicalDevice, *vertexBuf);
+    std::shared_ptr<vk::UniqueBuffer> stagingVertexBuf = getStagingVertexBuffer(*device, physicalDevice);
+    std::shared_ptr<vk::UniqueDeviceMemory> stagingVertexBufMem = getStagingVertexBufferMemory(*device, physicalDevice, *stagingVertexBuf);
+    writeStagingVertexBuffer(*device, *stagingVertexBufMem);
+    sendVertexBuffer(*device, queueFamilyIndex, graphicsQueue, *stagingVertexBuf, *vertexBuf);
+
+    std::shared_ptr<vk::UniqueBuffer> indexBuf = getIndexBuffer(*device);
+    std::shared_ptr<vk::UniqueDeviceMemory> indexBufferMem = getIndexBufferMemory(*device, physicalDevice, *indexBuf);
+    std::shared_ptr<vk::UniqueBuffer> stagingIndexBuf = getStagingIndexBuffer(*device, physicalDevice);
+    std::shared_ptr<vk::UniqueDeviceMemory> stagingIndexBufMem = getStagingIndexBufferMemory(*device, physicalDevice, *stagingIndexBuf);
+    writeStagingIndexBuffer(*device, *stagingIndexBufMem);
+    sendIndexBuffer(*device, queueFamilyIndex, graphicsQueue, *stagingIndexBuf, *indexBuf);
 
     std::shared_ptr<vk::SurfaceCapabilitiesKHR> surfaceCapabilities = getSurfaceCapabilities(physicalDevice, *surface);
     std::shared_ptr<std::vector<vk::SurfaceFormatKHR>> surfaceFormats = getSurfaceFormats(physicalDevice, *surface);
@@ -166,7 +177,8 @@ int main()
 
         (*cmdBufs)[0]->bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->get());
         (*cmdBufs)[0]->bindVertexBuffers(0, { vertexBuf->get() }, { 0 }); 
-        (*cmdBufs)[0]->draw(vertices.size(), 1, 0, 0);
+        (*cmdBufs)[0]->bindIndexBuffer(indexBuf->get(), 0, vk::IndexType::eUint16);
+        (*cmdBufs)[0]->drawIndexed(indices.size(), 1, 0, 0, 0);
     
         (*cmdBufs)[0]->endRenderPass();
 
