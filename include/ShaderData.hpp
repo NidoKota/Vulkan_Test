@@ -24,14 +24,67 @@ std::vector<Vertex> vertices = {
     Vertex{ Vec2{-0.5f, -0.5f }, Vec3{ 0.0, 0.0, 1.0 } },
     Vertex{ Vec2{ 0.5f,  0.5f }, Vec3{ 0.0, 1.0, 0.0 } },
     Vertex{ Vec2{-0.5f,  0.5f }, Vec3{ 1.0, 0.0, 0.0 } },
-    Vertex{ Vec2{ 0.5f,  0.5f }, Vec3{ 0.0, 1.0, 0.0 } },
-    Vertex{ Vec2{-0.5f, -0.5f }, Vec3{ 0.0, 0.0, 1.0 } },
     Vertex{ Vec2{ 0.5f, -0.5f }, Vec3{ 1.0, 1.0, 1.0 } },
 };
+
+std::vector<uint16_t> indices = { 0, 1, 2, 1, 0, 3 };
 
 std::shared_ptr<vk::UniqueBuffer> getVertexBuffer(vk::UniqueDevice& device)
 {
     std::shared_ptr<vk::UniqueBuffer> result = std::make_shared<vk::UniqueBuffer>();
+
+    // 次は実際に使われる頂点バッファの作成
+    // 今までと違い、メモリの確保時にvk::MemoryPropertyFlagBits::eDeviceLocalフラグを持ったメモリを使うようにする
+    // 逆にeHostVisibleは要らない
+    // また、usageにvk::BufferUsageFlagBits::eTransferDstを追加で指定する
+    // データの転送先という意味
+    // あとでステージングバッファからデータを転送してくる
+    vk::BufferCreateInfo vertexBufferCreateInfo;
+    vertexBufferCreateInfo.size = sizeof(Vertex) * vertices.size();
+    vertexBufferCreateInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst; // eTransferDstを追加
+    vertexBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
+    
+    *result = device.get().createBufferUnique(vertexBufferCreateInfo);
+    return result;
+}
+
+std::shared_ptr<vk::UniqueDeviceMemory> getVertexBufferMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueBuffer& vertexBuf)
+{
+    std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
+
+    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
+
+    vk::MemoryRequirements vertexBufMemReq = device.get().getBufferMemoryRequirements(vertexBuf.get());
+    
+    vk::MemoryAllocateInfo vertexBufMemAllocInfo;
+    vertexBufMemAllocInfo.allocationSize = vertexBufMemReq.size;
+    
+    bool suitableMemoryTypeFound = false;
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
+    {
+        if (vertexBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal))
+        {
+            vertexBufMemAllocInfo.memoryTypeIndex = i;
+            suitableMemoryTypeFound = true;
+            break;
+        }
+    }
+    if (!suitableMemoryTypeFound) 
+    {
+        std::cerr << "適切なメモリタイプが存在しません。" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    
+    *result = device.get().allocateMemoryUnique(vertexBufMemAllocInfo);
+    device.get().bindBufferMemory(vertexBuf.get(), result->get(), 0);
+    return result;
+}
+
+std::shared_ptr<vk::UniqueBuffer> getStagingVertexBuffer(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice)
+{
+    std::shared_ptr<vk::UniqueBuffer> result = std::make_shared<vk::UniqueBuffer>();
+
+    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
 
     // バッファというのはデバイスメモリ上のデータ列を表すオブジェクト
     // 何度も言うようにGPUから普通のメモリの内容は参照できない
@@ -47,38 +100,30 @@ std::shared_ptr<vk::UniqueBuffer> getVertexBuffer(vk::UniqueDevice& device)
     // 他にも場合によって様々なフラグを指定する必要があり、複数のフラグを指定することもある
     // sharingModeについては今のところは無視
     // ここではvk::SharingMode::eExclusiveを指定
-    vk::BufferCreateInfo vertBufferCreateInfo;
-    vertBufferCreateInfo.size = sizeof(Vertex) * vertices.size();
-    vertBufferCreateInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer;
-    vertBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
-    
-    *result = device.get().createBufferUnique(vertBufferCreateInfo);
+    vk::BufferCreateInfo stagingBufferCreateInfo;
+    stagingBufferCreateInfo.size = sizeof(Vertex) * vertices.size();
+    stagingBufferCreateInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
+    stagingBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
+
+    *result = device.get().createBufferUnique(stagingBufferCreateInfo);
     return result;
 }
 
-std::shared_ptr<vk::UniqueDeviceMemory> writeVertexBuffer(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueBuffer& vertexBuf)
+std::shared_ptr<vk::UniqueDeviceMemory> getStagingVertexBufferMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueBuffer& stagingVertexBuf)
 {
     std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
 
-    // 上のようにバッファオブジェクトを作成しても、すぐには使えない
-    // データを入れるデバイスメモリを別途確保し、バッファオブジェクトと結びつける必要がある
-    // 3章のイメージ(vk::Image)のときと同じ
-    // イメージに対してgetImageMemoryRequirementsがあったように、バッファにも getBufferMemoryRequirements という関数があり、これで必要なデバイスメモリのタイプ・サイズを取得する
-    // その後の流れもイメージのときと同じで、allocateMemoryを用いてメモリを確保する
     vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
 
-    vk::MemoryRequirements vertexBufMemReq = device.get().getBufferMemoryRequirements(vertexBuf.get());
-
+    vk::MemoryRequirements vertexBufMemReq = device.get().getBufferMemoryRequirements(stagingVertexBuf.get());
+    
     vk::MemoryAllocateInfo vertexBufMemAllocInfo;
     vertexBufMemAllocInfo.allocationSize = vertexBufMemReq.size;
-
+    
     bool suitableMemoryTypeFound = false;
     for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
     {
-        // 重要なこととして、デバイスメモリの中にはホスト側から書き込めるメモリと書き込めないメモリがある
-        // 今回はデータを書き込みたいわけなので、ホスト側から書き込めるようなメモリを選ぶ必要がある
-        // ホスト側から見えるようなメモリ(HostVisible)かどうかのチェックを追加
-        if (vertexBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible)) 
+        if (vertexBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible)) // デバイスローカルに変更
         {
             vertexBufMemAllocInfo.memoryTypeIndex = i;
             suitableMemoryTypeFound = true;
@@ -90,42 +135,211 @@ std::shared_ptr<vk::UniqueDeviceMemory> writeVertexBuffer(vk::UniqueDevice& devi
         std::cerr << "適切なメモリタイプが存在しません。" << std::endl;
         exit(EXIT_FAILURE);
     }
-
+    
     *result = device.get().allocateMemoryUnique(vertexBufMemAllocInfo);
+    device.get().bindBufferMemory(stagingVertexBuf.get(), result->get(), 0);
+    return result;
+}
 
-    // デバイスメモリが確保出来たら bindBufferMemoryで結び付ける
-    // これもイメージの作成のときと同じような感じ
-    // 第1引数は結びつけるバッファ、第2引数は結びつけるデバイスメモリ
-    // 第3引数は、これも以前説明したbindImageMemoryと同じ要領で、確保したデバイスメモリのどこを(先頭から何バイト目以降を)使用するかを指定するもの
-    device.get().bindBufferMemory(vertexBuf.get(), result->get(), 0);
+void writeStagingVertexBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& stagingVertexBufMem)
+{
+    void* pStagingVertexBufMem = device.get().mapMemory(stagingVertexBufMem.get(), 0, sizeof(Vertex) * vertices.size());
 
-    // 具体的にデバイスメモリに書き込む方法だが、メモリマッピングというものを行う
-    // これは、操作したい対象のデバイスメモリを仮想的にアプリケーションのメモリ空間に対応付けることで操作出来るようにするもの
-    // 対象のデバイスメモリを直接操作するわけにはいかないのでこういう形になっている
-    //
-    // 第1引数はメモリマッピングを行う対象のデバイスメモリ(vk::DeviceMemory)です。
-    // 第2、第3引数にはメモリマッピングを行う範囲を指定します。第2引数が範囲の開始地点(先頭から何バイト目)、
-    // 第3引数が範囲の大きさ(バイト数)です。今回は第2引数に0、第3引数にデバイスメモリの大きさと同じ値を示しているので、確保したメモリの最初から最後までをマッピングしている
-    // 戻り値でマッピングが行われたメモリのアドレスが返ってくるので、この戻り値のアドレスに対して色々操作を行うことでデータを書き込む(読み込む)ことができる
-    void* vertexBufMem = device.get().mapMemory(result->get(), 0, sizeof(Vertex) * vertices.size());
+    std::memcpy(pStagingVertexBufMem, vertices.data(), sizeof(Vertex) * vertices.size());
 
-    // どんな方法をとっても特に問題はないが、ここではmemcpyを使う
-    // 頂点のデータをメモリにコピーする
-    std::memcpy(vertexBufMem, vertices.data(), sizeof(Vertex) * vertices.size());
-
-    // 書き込んだら flushMappedMemoryRangesメソッドを呼ぶことで書き込んだ内容がデバイスメモリに反映する
-    // マッピングされたメモリはあくまで仮想的にデバイスメモリと対応付けられているだけで、「同期しておけよ」と念をおさないとデータが同期されない可能性がある
     vk::MappedMemoryRange flushMemoryRange;
-    flushMemoryRange.memory = result->get();
+    flushMemoryRange.memory = stagingVertexBufMem.get();
     flushMemoryRange.offset = 0;
     flushMemoryRange.size = sizeof(Vertex) * vertices.size();
     
-    // 同期を行う対象と範囲はvk::MappedMemoryRangeで表され、複数指定できる (今回は1つだけ)
     device.get().flushMappedMemoryRanges({ flushMemoryRange });
-    // 作業が終わった後はunmapMemoryできちんと後片付けをします。
-    device.get().unmapMemory(result->get());
+    device.get().unmapMemory(stagingVertexBufMem.get());
+}
+
+void sendVertexBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Queue& graphicsQueue, vk::UniqueBuffer& stagingBuf, vk::UniqueBuffer& vertexBuf)
+{
+    // こちらはメモリマッピングではデータを入れられない ホスト可視でないため
+    // ホスト可視でないメモリはCPUからは触れない
+    // GPUにコピーさせる訳だが、GPUに命令するということは例によってコマンドバッファとキューを使う
+    // データの転送用に、コマンドバッファを作成するコードを別途追加する
+    vk::CommandPoolCreateInfo tmpCmdPoolCreateInfo;
+    tmpCmdPoolCreateInfo.queueFamilyIndex = queueFamilyIndex;
+    tmpCmdPoolCreateInfo.flags = vk::CommandPoolCreateFlagBits::eTransient;
+    vk::UniqueCommandPool tmpCmdPool = device->createCommandPoolUnique(tmpCmdPoolCreateInfo);
     
+    vk::CommandBufferAllocateInfo tmpCmdBufAllocInfo;
+    tmpCmdBufAllocInfo.commandPool = tmpCmdPool.get();
+    tmpCmdBufAllocInfo.commandBufferCount = 1;
+    tmpCmdBufAllocInfo.level = vk::CommandBufferLevel::ePrimary;
+    std::vector<vk::UniqueCommandBuffer> tmpCmdBufs = device->allocateCommandBuffersUnique(tmpCmdBufAllocInfo);
+
+    // 今までのコードと違う点として、コマンドプールにvk::CommandPoolCreateFlagBits::eTransientフラグを指定する
+    // これは比較的すぐに使ってすぐに役目を終えるコマンドバッファ用であることを意味するフラグ
+    // 必須ではないですが指定しておくと内部的に最適化が起きる可能性がある
+    // このコマンドバッファを使ってデータ転送の命令を飛ばす
+    vk::BufferCopy bufCopy;
+    bufCopy.srcOffset = 0;
+    bufCopy.dstOffset = 0;
+    bufCopy.size = sizeof(Vertex) * vertices.size();
+
+    vk::CommandBufferBeginInfo cmdBeginInfo;
+    cmdBeginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+
+    tmpCmdBufs[0]->begin(cmdBeginInfo);
+    tmpCmdBufs[0]->copyBuffer(stagingBuf.get(), vertexBuf.get(), {bufCopy});
+    tmpCmdBufs[0]->end();
+
+    // バッファ間でデータをコピーするには copyBuffer を使います。そしてコピーするバッファやコピーする領域を指定するために vk::BufferCopy 構造体を使います。
+    // srcOffsetは転送元バッファの先頭から何バイト目を読み込むというデータ位置、dstOffsetは転送先バッファの先頭から何バイト目に書き込むというデータ位置、sizeはデータサイズを表します。memcpyの引数と似たような感じだと理解すると分かりやすいかもしれません。
+    // あとはキューに投げるだけです。
+    vk::CommandBuffer submitCmdBuf[1] = {tmpCmdBufs[0].get()};
+    vk::SubmitInfo submitInfo;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = submitCmdBuf;
+
+    graphicsQueue.submit({submitInfo});
+    graphicsQueue.waitIdle();
+}
+
+std::shared_ptr<vk::UniqueBuffer> getIndexBuffer(vk::UniqueDevice& device)
+{
+    std::shared_ptr<vk::UniqueBuffer> result = std::make_shared<vk::UniqueBuffer>();
+
+    vk::BufferCreateInfo indexBufferCreateInfo;
+    indexBufferCreateInfo.size = sizeof(uint16_t) * indices.size();
+    indexBufferCreateInfo.usage = vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst; 
+    indexBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
+    
+    *result = device.get().createBufferUnique(indexBufferCreateInfo);
     return result;
+}
+
+std::shared_ptr<vk::UniqueDeviceMemory> getIndexBufferMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueBuffer& indexBuf)
+{
+    std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
+
+    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
+
+    vk::MemoryRequirements indexBufMemReq = device.get().getBufferMemoryRequirements(indexBuf.get());
+    
+    vk::MemoryAllocateInfo indexBufMemAllocInfo;
+    indexBufMemAllocInfo.allocationSize = indexBufMemReq.size;
+    
+    bool suitableMemoryTypeFound = false;
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
+    {
+        if (indexBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal))
+        {
+            indexBufMemAllocInfo.memoryTypeIndex = i;
+            suitableMemoryTypeFound = true;
+            break;
+        }
+    }
+    if (!suitableMemoryTypeFound) 
+    {
+        std::cerr << "適切なメモリタイプが存在しません。" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    
+    *result = device.get().allocateMemoryUnique(indexBufMemAllocInfo);
+    device.get().bindBufferMemory(indexBuf.get(), result->get(), 0);
+    return result;
+}
+
+std::shared_ptr<vk::UniqueBuffer> getStagingIndexBuffer(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice)
+{
+    std::shared_ptr<vk::UniqueBuffer> result = std::make_shared<vk::UniqueBuffer>();
+
+    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
+
+    vk::BufferCreateInfo stagingBufferCreateInfo;
+    stagingBufferCreateInfo.size = sizeof(uint16_t) * indices.size();
+    stagingBufferCreateInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
+    stagingBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
+
+    *result = device.get().createBufferUnique(stagingBufferCreateInfo);
+    return result;
+}
+
+std::shared_ptr<vk::UniqueDeviceMemory> getStagingIndexBufferMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueBuffer& stagingIndexBuf)
+{
+    std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
+
+    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
+
+    vk::MemoryRequirements indexBufMemReq = device.get().getBufferMemoryRequirements(stagingIndexBuf.get());
+    
+    vk::MemoryAllocateInfo indexBufMemAllocInfo;
+    indexBufMemAllocInfo.allocationSize = indexBufMemReq.size;
+    
+    bool suitableMemoryTypeFound = false;
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
+    {
+        if (indexBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible))
+        {
+            indexBufMemAllocInfo.memoryTypeIndex = i;
+            suitableMemoryTypeFound = true;
+            break;
+        }
+    }
+    if (!suitableMemoryTypeFound) 
+    {
+        std::cerr << "適切なメモリタイプが存在しません。" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    
+    *result = device.get().allocateMemoryUnique(indexBufMemAllocInfo);
+    device.get().bindBufferMemory(stagingIndexBuf.get(), result->get(), 0);
+    return result;
+}
+
+void writeStagingIndexBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& stagingIndexBufMem)
+{
+    void* pStagingIndexBufMem = device.get().mapMemory(stagingIndexBufMem.get(), 0, sizeof(uint16_t) * indices.size());
+
+    std::memcpy(pStagingIndexBufMem, indices.data(), sizeof(uint16_t) * indices.size());
+
+    vk::MappedMemoryRange flushMemoryRange;
+    flushMemoryRange.memory = stagingIndexBufMem.get();
+    flushMemoryRange.offset = 0;
+    flushMemoryRange.size = sizeof(uint16_t) * indices.size();
+    
+    device.get().flushMappedMemoryRanges({ flushMemoryRange });
+    device.get().unmapMemory(stagingIndexBufMem.get());
+}
+
+void sendIndexBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Queue& graphicsQueue, vk::UniqueBuffer& stagingBuf, vk::UniqueBuffer& indexBuf)
+{
+    vk::CommandPoolCreateInfo tmpCmdPoolCreateInfo;
+    tmpCmdPoolCreateInfo.queueFamilyIndex = queueFamilyIndex;
+    tmpCmdPoolCreateInfo.flags = vk::CommandPoolCreateFlagBits::eTransient;
+    vk::UniqueCommandPool tmpCmdPool = device->createCommandPoolUnique(tmpCmdPoolCreateInfo);
+    
+    vk::CommandBufferAllocateInfo tmpCmdBufAllocInfo;
+    tmpCmdBufAllocInfo.commandPool = tmpCmdPool.get();
+    tmpCmdBufAllocInfo.commandBufferCount = 1;
+    tmpCmdBufAllocInfo.level = vk::CommandBufferLevel::ePrimary;
+    std::vector<vk::UniqueCommandBuffer> tmpCmdBufs = device->allocateCommandBuffersUnique(tmpCmdBufAllocInfo);
+
+    vk::BufferCopy bufCopy;
+    bufCopy.srcOffset = 0;
+    bufCopy.dstOffset = 0;
+    bufCopy.size = sizeof(uint16_t) * indices.size();
+
+    vk::CommandBufferBeginInfo cmdBeginInfo;
+    cmdBeginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+
+    tmpCmdBufs[0]->begin(cmdBeginInfo);
+    tmpCmdBufs[0]->copyBuffer(stagingBuf.get(), indexBuf.get(), {bufCopy});
+    tmpCmdBufs[0]->end();
+
+    vk::CommandBuffer submitCmdBuf[1] = {tmpCmdBufs[0].get()};
+    vk::SubmitInfo submitInfo;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = submitCmdBuf;
+
+    graphicsQueue.submit({submitInfo});
+    graphicsQueue.waitIdle();
 }
 
 std::shared_ptr<std::vector<vk::VertexInputBindingDescription>> getVertexBindingDescription()
