@@ -12,6 +12,8 @@
 #include <sstream>
 #include <iomanip>
 #include <optional>
+#include <algorithm>
+#include <iterator>
 
 namespace Vulkan_Test
 {
@@ -49,6 +51,22 @@ namespace Vulkan_Test
             s << "    ";
         }
         return s.str();
+    }
+
+    template <class T, class UniqueT>
+    std::shared_ptr<std::vector<T>> unwrapHandles(std::vector<UniqueT>& uniques)
+    {
+        std::shared_ptr<std::vector<T>> result = std::make_shared<std::vector<T>>();
+        result->reserve(uniques.size());
+
+        std::transform(uniques.begin(), uniques.end(), std::back_inserter(*result),
+            [](const UniqueT& unique) -> const T&
+            {
+                return unique.get();
+            }
+        );  
+
+        return result;
     }
 
 #define SS2STR(x) \

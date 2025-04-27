@@ -15,7 +15,8 @@ std::shared_ptr<vk::UniquePipeline> getPipeline(
     vk::UniqueRenderPass& renderpass, 
     vk::SurfaceCapabilitiesKHR& surfaceCapabilities, 
     std::vector<vk::VertexInputBindingDescription>& vertexBindingDescription, 
-    std::vector<vk::VertexInputAttributeDescription>& vertexInputDescription)
+    std::vector<vk::VertexInputAttributeDescription>& vertexInputDescription,
+    vk::UniquePipelineLayout& pipelineLayout)
 {
     std::shared_ptr<vk::UniquePipeline> result = std::make_shared<vk::UniquePipeline>();
 
@@ -89,12 +90,6 @@ std::shared_ptr<vk::UniquePipeline> getPipeline(
     blend.logicOpEnable = false;
     blend.attachmentCount = 1;
     blend.pAttachments = blendattachment;
-
-    vk::PipelineLayoutCreateInfo layoutCreateInfo;
-    layoutCreateInfo.setLayoutCount = 0;
-    layoutCreateInfo.pSetLayouts = nullptr;
-
-    vk::UniquePipelineLayout pipelineLayout = device.get().createPipelineLayoutUnique(layoutCreateInfo);
 
     vk::UniqueShaderModule vertShader;
     vk::UniqueShaderModule fragShader;

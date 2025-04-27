@@ -21,6 +21,10 @@ struct Vertex {
     Vec3 color;
 };
 
+struct SceneData {
+    Vec2 rectCenter;
+};
+
 std::vector<Vertex> vertices = {
     Vertex{ Vec2{-0.5f, -0.5f }, Vec3{ 0.0, 0.0, 1.0 } },
     Vertex{ Vec2{ 0.5f,  0.5f }, Vec3{ 0.0, 1.0, 0.0 } },
@@ -29,6 +33,8 @@ std::vector<Vertex> vertices = {
 };
 
 std::vector<uint16_t> indices = { 0, 1, 2, 1, 0, 3 };
+
+SceneData sceneData = { Vec2{ 0.3, -0.2 } };
 
 std::shared_ptr<vk::UniqueBuffer> getVertexBuffer(vk::UniqueDevice& device)
 {
@@ -88,7 +94,7 @@ std::shared_ptr<vk::UniqueDeviceMemory> getVertexBufferMemory(vk::UniqueDevice& 
     }
     if (!suitableMemoryTypeFound) 
     {
-        std::cerr << "適切なメモリタイプが存在しません。" << std::endl;
+        LOGERR("Suitable memory type not found. ");
         exit(EXIT_FAILURE);
     }
     
@@ -138,7 +144,7 @@ std::shared_ptr<vk::UniqueDeviceMemory> getStagingVertexBufferMemory(vk::UniqueD
     }
     if (!suitableMemoryTypeFound) 
     {
-        std::cerr << "適切なメモリタイプが存在しません。" << std::endl;
+        LOGERR("Suitable memory type not found. ");
         exit(EXIT_FAILURE);
     }
     
@@ -251,7 +257,7 @@ std::shared_ptr<vk::UniqueDeviceMemory> getIndexBufferMemory(vk::UniqueDevice& d
     }
     if (!suitableMemoryTypeFound) 
     {
-        std::cerr << "適切なメモリタイプが存在しません。" << std::endl;
+        LOGERR("Suitable memory type not found. ");
         exit(EXIT_FAILURE);
     }
     
@@ -298,7 +304,7 @@ std::shared_ptr<vk::UniqueDeviceMemory> getStagingIndexBufferMemory(vk::UniqueDe
     }
     if (!suitableMemoryTypeFound) 
     {
-        std::cerr << "適切なメモリタイプが存在しません。" << std::endl;
+        LOGERR("Suitable memory type not found. ");
         exit(EXIT_FAILURE);
     }
     
@@ -354,6 +360,202 @@ void sendIndexBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Qu
 
     graphicsQueue.submit({submitInfo});
     graphicsQueue.waitIdle();
+}
+
+std::shared_ptr<vk::UniqueBuffer> getUniformBuffer(vk::UniqueDevice& device)
+{
+    std::shared_ptr<vk::UniqueBuffer> result = std::make_shared<vk::UniqueBuffer>();
+    
+    vk::BufferCreateInfo uniformBufferCreateInfo;
+    uniformBufferCreateInfo.size = sizeof(SceneData);
+    // usageはvk::BufferUsageFlagBits::eUniformBufferを指定
+    uniformBufferCreateInfo.usage = vk::BufferUsageFlagBits::eUniformBuffer;
+    uniformBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
+
+    *result = device.get().createBufferUnique(uniformBufferCreateInfo);
+    return result;
+}
+
+std::shared_ptr<vk::UniqueDeviceMemory> getUniformBufferMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueBuffer& uniformBuf)
+{    
+    std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
+    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
+
+    vk::MemoryRequirements uniformBufMemReq = device->getBufferMemoryRequirements(uniformBuf.get());
+
+    vk::MemoryAllocateInfo uniformBufMemAllocInfo;
+    uniformBufMemAllocInfo.allocationSize = uniformBufMemReq.size;
+
+    bool suitableMemoryTypeFound = false;
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
+    {
+        if (uniformBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible)) 
+        {
+            uniformBufMemAllocInfo.memoryTypeIndex = i;
+            suitableMemoryTypeFound = true;
+            break;
+        }
+    }
+    if (!suitableMemoryTypeFound) 
+    {
+        LOGERR("Suitable memory type not found. ");
+        exit(EXIT_FAILURE);
+    }
+
+
+    *result = device.get().allocateMemoryUnique(uniformBufMemAllocInfo);
+    device->bindBufferMemory(uniformBuf.get(), result->get(), 0);
+    return result;
+}
+
+void writeUniformBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& uniformBufMem)
+{
+    void* pUniformBufMem = device.get().mapMemory(uniformBufMem.get(), 0, sizeof(SceneData));
+
+    std::memcpy(pUniformBufMem, &sceneData, sizeof(SceneData));
+
+    vk::MappedMemoryRange flushMemoryRange;
+    flushMemoryRange.memory = uniformBufMem.get();
+    flushMemoryRange.offset = 0;
+    flushMemoryRange.size = sizeof(SceneData);
+
+    device.get().flushMappedMemoryRanges({ flushMemoryRange });
+    device.get().unmapMemory(uniformBufMem.get());
+}
+
+std::shared_ptr<std::vector<vk::UniqueDescriptorSetLayout>> getDiscriptorSetLayouts(vk::UniqueDevice& device)
+{
+    std::shared_ptr<std::vector<vk::UniqueDescriptorSetLayout>> result = std::make_shared<std::vector<vk::UniqueDescriptorSetLayout>>();
+
+    // vk::DescriptorSetLayoutBindingがデスクリプタ1つの情報を表す
+    // これの配列からデスクリプタセットレイアウトを作成
+    //
+    // binding はシェーダと結びつけるための番号を表す = バインディング番号
+    //    頂点シェーダにlayout(set = 0, binding = 0)などと指定したが、このときのbindingの数字と揃えてあることに注意
+    // descriptorType はデスクリプタの種別を示す
+    //    今回シェーダに渡すものはバッファなのでvk::DescriptorType::eUniformBufferを指定
+    // descriptorCount はデスクリプタの個数を表す
+    //    デスクリプタは配列として複数のデータを持てるが、ここにその要素数を指定する 今回は1個だけなので1を指定
+    // stageFlags はデータを渡す対象となるシェーダを示す 
+    //    今回は頂点シェーダだけに渡すのでvk::ShaderStageFlagBits::eVertexを指定 フラグメントシェーダに渡したい場合はvk::ShaderStageFlagBits::eFragmentを指定します。ビットマスクなので、ORで重ねれば両方に渡すことも可能です。
+
+    vk::DescriptorSetLayoutBinding descSetLayoutBinding[1];
+    descSetLayoutBinding[0].binding = 0;
+    descSetLayoutBinding[0].descriptorType = vk::DescriptorType::eUniformBuffer;
+    descSetLayoutBinding[0].descriptorCount = 1;
+    descSetLayoutBinding[0].stageFlags = vk::ShaderStageFlagBits::eVertex;
+    
+    vk::DescriptorSetLayoutCreateInfo descSetLayoutCreateInfo{};
+    descSetLayoutCreateInfo.bindingCount = 1;
+    descSetLayoutCreateInfo.pBindings = descSetLayoutBinding;
+    
+    // デスクリプタセットレイアウトを作成したあとはそれをパイプラインレイアウトに設定する必要がある
+    // パイプラインは描画の手順を表すオブジェクト
+    // 頂点入力デスクリプションなどと同様、シェーダへのデータの読み込ませ方はここで設定する
+    (*result).push_back(device->createDescriptorSetLayoutUnique(descSetLayoutCreateInfo));
+    return result;
+}
+
+std::shared_ptr<vk::UniqueDescriptorPool> getDescriptorPool(vk::UniqueDevice& device)
+{
+    std::shared_ptr<vk::UniqueDescriptorPool> result = std::make_shared<vk::UniqueDescriptorPool>();
+
+    // 次にデスクリプタプールを作成
+    // 重要なこととしてデスクリプタには種類がある
+    // そのためデスクリプタプールも、「この種類のデスクリプタをこの数」と指定して作成する必要がある
+    // 必要な種類と数をきちんと指定する
+    vk::DescriptorPoolSize descPoolSize[1];
+    descPoolSize[0].type = vk::DescriptorType::eUniformBuffer;
+    descPoolSize[0].descriptorCount = 1;
+
+    // vk::DescriptorPoolSizeの配列を poolSizeCountとpPoolSizes に指定
+    // vk::DescriptorPoolSizeはtypeがデスクリプタの種類でdescriptorCountがデスクリプタの数
+    // vk::DescriptorPoolCreateInfoに maxSets というメンバがあるが、これはデスクリプタプールから作成するデスクリプタセットの数の上限を指定
+    vk::DescriptorPoolCreateInfo descPoolCreateInfo;
+    descPoolCreateInfo.poolSizeCount = std::size(descPoolSize);
+    descPoolCreateInfo.pPoolSizes = descPoolSize;
+    descPoolCreateInfo.maxSets = 1;
+
+    *result = device->createDescriptorPoolUnique(descPoolCreateInfo);
+    return result;
+}
+
+std::shared_ptr<std::vector<vk::UniqueDescriptorSet>> getDescprotorSets(vk::UniqueDevice& device, vk::UniqueDescriptorPool& descPool, std::vector<vk::DescriptorSetLayout>& descSetLayouts)
+{
+    std::shared_ptr<std::vector<vk::UniqueDescriptorSet>> result = std::make_shared<std::vector<vk::UniqueDescriptorSet>>();
+
+    // 最後にデスクリプタセットを作成
+    // デスクリプタセットはデバイスの allocateDescriptorSetsメソッドを用いて作成する
+    // createではなくallocateなあたりで「デスクリプタプールから割り当てる」という気持ちが読み取れる
+
+    // 構造を示すデスクリプタセットレイアウト、実体を記録するデスクリプタプールを指定して作成 
+    // またSetsと複数形になっているところから分かる通り、一度に複数のデスクリプタセットを作成できる
+    // デスクリプタセットレイアウトが配列によって複数渡せるようになっているのはそのため
+
+    // デスクリプタ関係でややこしいのは、デスクリプタセットを表すvk::DescriptorSet、デスクリプタプールを表すvk::DescriptorPoolなどは存在するのに、
+    // 1つのデスクリプタを表すvk::Descriptorなどというオブジェクトは存在しないということ
+    // デスクリプタは常に「あるデスクリプタセットの何番目のデスクリプタ」という形でしか触ることができない
+    
+    vk::DescriptorSetAllocateInfo descSetAllocInfo;
+    
+    descSetAllocInfo.descriptorPool = descPool.get();
+    descSetAllocInfo.descriptorSetCount = 1;
+    descSetAllocInfo.pSetLayouts = &(descSetLayouts[0]);
+    
+    *result = device->allocateDescriptorSetsUnique(descSetAllocInfo);
+    return result;
+}
+
+std::shared_ptr<vk::UniquePipelineLayout> getDescpriptorPipelineLayout(vk::UniqueDevice& device, std::vector<vk::DescriptorSetLayout>& descSetLayouts)
+{
+    std::shared_ptr<vk::UniquePipelineLayout> result = std::make_shared<vk::UniquePipelineLayout>();
+
+    vk::PipelineLayoutCreateInfo layoutCreateInfo;
+    layoutCreateInfo.setLayoutCount = descSetLayouts.size();
+    layoutCreateInfo.pSetLayouts = descSetLayouts.data();
+
+    *result = device->createPipelineLayoutUnique(layoutCreateInfo);
+    return result;
+}
+
+void writeDescriptorSets(vk::UniqueDevice& device, std::vector<vk::UniqueDescriptorSet>& descSets, vk::UniqueBuffer& uniformBuf)
+{
+    // 今はまだデスクリプタセットを作っただけでその中身は何もないので、updateDescriptorSetsで中身を設定する必要がある
+    // デスクリプタへの書き込み情報はvk::WriteDescriptorSet構造体で表される
+
+    // 一度に複数のvk::WriteDescriptorSetをupdateDescriptorSetsに渡せば複数のデスクリプタの更新を行うことも可能
+    // dstSet は書き込みの対象とするデスクリプタセット
+
+    // dstBinding は書き込みの対象とするデスクリプタのバインディング番号
+    // dstArrayElement は書き込みの対象とするデスクリプタの配列要素の番号
+    // デスクリプタは配列であって複数のデータが持てる、という話をしたが、その配列上の何番からの要素に書き込むかをここに指定する
+    
+    // descriptorType は書き込みの対象となるデスクリプタの種別
+    // ここではvk::DescriptorType::eUniformBufferを指定
+
+    // バッファタイプのデスクリプタに書き込む場合、vk::DescriptorBufferInfo の配列を pBufferInfoとdescriptorCount に指定
+    // vk::DescriptorBufferInfoのメンバについて解説すると、buffer が用いるバッファ、offset がバッファ上の先頭から何バイト目からをデータとして用いるか、range がデータの大きさ(バイト数)になる
+
+    // 混乱を避けるために書いておくと、デスクリプタが持っている情報は「0.3, -0.2」といった数値ではなく、あくまで「このバッファのこの位置のデータをシェーダに渡す」という情報
+    // デスクリプタ=ポインタみたいなものと考えた方が良い
+    // 従って、データの変更のたびにupdateDescriptorSetsを呼ばなくてもバッファのメモリ内容を書き換えればシェーダに渡すデータも変えられる
+    // 途中で別のバッファや別の領域を使うといったことをしない限り、updateDescriptorSetsによる設定は最初の1回だけで十分です。
+
+    vk::WriteDescriptorSet writeDescSet;
+    writeDescSet.dstSet = descSets[0].get();
+    writeDescSet.dstBinding = 0;
+    writeDescSet.dstArrayElement = 0;
+    writeDescSet.descriptorType = vk::DescriptorType::eUniformBuffer;
+    
+    vk::DescriptorBufferInfo descBufInfo[1];
+    descBufInfo[0].buffer = uniformBuf.get();
+    descBufInfo[0].offset = 0;
+    descBufInfo[0].range = sizeof(SceneData);
+    
+    writeDescSet.descriptorCount = 1;
+    writeDescSet.pBufferInfo = descBufInfo;
+    
+    device->updateDescriptorSets({ writeDescSet }, {});
 }
 
 std::shared_ptr<std::vector<vk::VertexInputBindingDescription>> getVertexBindingDescription()

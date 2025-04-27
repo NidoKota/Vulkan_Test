@@ -62,11 +62,21 @@ int main()
     sendVertexBuffer(*device, queueFamilyIndex, graphicsQueue, *stagingVertexBuf, *vertexBuf);
 
     std::shared_ptr<vk::UniqueBuffer> indexBuf = getIndexBuffer(*device);
-    std::shared_ptr<vk::UniqueDeviceMemory> indexBufferMem = getIndexBufferMemory(*device, physicalDevice, *indexBuf);
+    std::shared_ptr<vk::UniqueDeviceMemory> indexBufMem = getIndexBufferMemory(*device, physicalDevice, *indexBuf);
     std::shared_ptr<vk::UniqueBuffer> stagingIndexBuf = getStagingIndexBuffer(*device, physicalDevice);
     std::shared_ptr<vk::UniqueDeviceMemory> stagingIndexBufMem = getStagingIndexBufferMemory(*device, physicalDevice, *stagingIndexBuf);
     writeStagingIndexBuffer(*device, *stagingIndexBufMem);
     sendIndexBuffer(*device, queueFamilyIndex, graphicsQueue, *stagingIndexBuf, *indexBuf);
+
+    std::shared_ptr<vk::UniqueBuffer> uniformBuf = getUniformBuffer(*device);
+    std::shared_ptr<vk::UniqueDeviceMemory> uniformBufMem = getUniformBufferMemory(*device, physicalDevice, *uniformBuf);
+    writeUniformBuffer(*device, *uniformBufMem);
+    std::shared_ptr<std::vector<vk::UniqueDescriptorSetLayout>> descSetLayouts = getDiscriptorSetLayouts(*device);
+    std::shared_ptr<std::vector<vk::DescriptorSetLayout>> unwrapedDescSetLayouts = unwrapHandles<vk::DescriptorSetLayout, vk::UniqueDescriptorSetLayout>(*descSetLayouts);
+    std::shared_ptr<vk::UniqueDescriptorPool> descPool = getDescriptorPool(*device);
+    std::shared_ptr<std::vector<vk::UniqueDescriptorSet>> descSets = getDescprotorSets(*device, *descPool, *unwrapedDescSetLayouts);
+    writeDescriptorSets(*device, *descSets, *uniformBuf);
+    std::shared_ptr<vk::UniquePipelineLayout> descpriptorPipelineLayout = getDescpriptorPipelineLayout(*device, *unwrapedDescSetLayouts);
 
     std::shared_ptr<vk::SurfaceCapabilitiesKHR> surfaceCapabilities = getSurfaceCapabilities(physicalDevice, *surface);
     std::shared_ptr<std::vector<vk::SurfaceFormatKHR>> surfaceFormats = getSurfaceFormats(physicalDevice, *surface);
@@ -78,7 +88,7 @@ int main()
     std::shared_ptr<std::vector<vk::SubpassDescription>> subpasses = getSubpassDescription(*subpass0_attachmentRefs);
 
     std::shared_ptr<vk::UniqueRenderPass> renderPass = getRenderPass(*device, surfaceFormat, *subpasses);
-    std::shared_ptr<vk::UniquePipeline> pipeline = getPipeline(*device, *renderPass, *surfaceCapabilities, *vertexBindingDescriptio, *vertexInputDescription);
+    std::shared_ptr<vk::UniquePipeline> pipeline = getPipeline(*device, *renderPass, *surfaceCapabilities, *vertexBindingDescriptio, *vertexInputDescription, *descpriptorPipelineLayout);
 
     std::shared_ptr<vk::UniqueSwapchainKHR> swapchain;
     std::shared_ptr<std::vector<vk::Image>> swapchainImages;
@@ -179,6 +189,7 @@ int main()
         (*cmdBufs)[0]->bindVertexBuffers(0, { vertexBuf->get() }, { 0 }); 
         (*cmdBufs)[0]->bindIndexBuffer(indexBuf->get(), 0, vk::IndexType::eUint16);
         (*cmdBufs)[0]->drawIndexed(indices.size(), 1, 0, 0, 0);
+        (*cmdBufs)[0]->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, descpriptorPipelineLayout->get(), 0, { (*descSets)[0].get() }, {});
     
         (*cmdBufs)[0]->endRenderPass();
 
