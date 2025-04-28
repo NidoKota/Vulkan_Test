@@ -402,17 +402,19 @@ std::shared_ptr<vk::UniqueDeviceMemory> getUniformBufferMemory(vk::UniqueDevice&
         exit(EXIT_FAILURE);
     }
 
-
     *result = device.get().allocateMemoryUnique(uniformBufMemAllocInfo);
     device->bindBufferMemory(uniformBuf.get(), result->get(), 0);
     return result;
 }
 
-void writeUniformBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& uniformBufMem, int deltaTime)
+void* mapUniformBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& uniformBufMem)
+{
+    return device.get().mapMemory(uniformBufMem.get(), 0, sizeof(SceneData));
+}
+
+void writeUniformBuffer(void* pUniformBufMem, vk::UniqueDevice& device, vk::UniqueDeviceMemory& uniformBufMem, int deltaTime)
 {
     static float time = 0;
-
-    void* pUniformBufMem = device.get().mapMemory(uniformBufMem.get(), 0, sizeof(SceneData));
 
     sceneData.rectCenter = Vec2{ 0.3f * cosf(time), 0.3f * sinf(time) };
     time += deltaTime / 1000.0f;
@@ -428,7 +430,7 @@ void writeUniformBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& unifor
     // device.get().unmapMemory(uniformBufMem.get());
 }
 
-void disposeUniformBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& uniformBufMem)
+void unmapUniformBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& uniformBufMem)
 {
     device.get().unmapMemory(uniformBufMem.get());
 }
@@ -509,22 +511,10 @@ std::shared_ptr<std::vector<vk::UniqueDescriptorSet>> getDescprotorSets(vk::Uniq
     vk::DescriptorSetAllocateInfo descSetAllocInfo;
     
     descSetAllocInfo.descriptorPool = descPool.get();
-    descSetAllocInfo.descriptorSetCount = 1;
-    descSetAllocInfo.pSetLayouts = &(descSetLayouts[0]);
+    descSetAllocInfo.descriptorSetCount = descSetLayouts.size();
+    descSetAllocInfo.pSetLayouts = descSetLayouts.data();
     
     *result = device->allocateDescriptorSetsUnique(descSetAllocInfo);
-    return result;
-}
-
-std::shared_ptr<vk::UniquePipelineLayout> getDescpriptorPipelineLayout(vk::UniqueDevice& device, std::vector<vk::DescriptorSetLayout>& descSetLayouts)
-{
-    std::shared_ptr<vk::UniquePipelineLayout> result = std::make_shared<vk::UniquePipelineLayout>();
-
-    vk::PipelineLayoutCreateInfo layoutCreateInfo;
-    layoutCreateInfo.setLayoutCount = descSetLayouts.size();
-    layoutCreateInfo.pSetLayouts = descSetLayouts.data();
-
-    *result = device->createPipelineLayoutUnique(layoutCreateInfo);
     return result;
 }
 
@@ -566,6 +556,18 @@ void writeDescriptorSets(vk::UniqueDevice& device, std::vector<vk::UniqueDescrip
     writeDescSet.pBufferInfo = descBufInfo;
     
     device->updateDescriptorSets({ writeDescSet }, {});
+}
+
+std::shared_ptr<vk::UniquePipelineLayout> getDescpriptorPipelineLayout(vk::UniqueDevice& device, std::vector<vk::DescriptorSetLayout>& descSetLayouts)
+{
+    std::shared_ptr<vk::UniquePipelineLayout> result = std::make_shared<vk::UniquePipelineLayout>();
+
+    vk::PipelineLayoutCreateInfo layoutCreateInfo;
+    layoutCreateInfo.setLayoutCount = descSetLayouts.size();
+    layoutCreateInfo.pSetLayouts = descSetLayouts.data();
+
+    *result = device->createPipelineLayoutUnique(layoutCreateInfo);
+    return result;
 }
 
 std::shared_ptr<std::vector<vk::VertexInputBindingDescription>> getVertexBindingDescription()

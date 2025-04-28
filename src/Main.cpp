@@ -71,6 +71,7 @@ int main()
 
     std::shared_ptr<vk::UniqueBuffer> uniformBuf = getUniformBuffer(*device);
     std::shared_ptr<vk::UniqueDeviceMemory> uniformBufMem = getUniformBufferMemory(*device, physicalDevice, *uniformBuf);
+    void* pUniformBufMem = mapUniformBuffer(*device, *uniformBufMem);
     std::shared_ptr<std::vector<vk::UniqueDescriptorSetLayout>> descSetLayouts = getDiscriptorSetLayouts(*device);
     std::shared_ptr<std::vector<vk::DescriptorSetLayout>> unwrapedDescSetLayouts = unwrapHandles<vk::DescriptorSetLayout, vk::UniqueDescriptorSetLayout>(*descSetLayouts);
     std::shared_ptr<vk::UniqueDescriptorPool> descPool = getDescriptorPool(*device);
@@ -144,8 +145,6 @@ int main()
         
         glfwPollEvents();
 
-        writeUniformBuffer(*device, *uniformBufMem, deltaTime);
-        
         vk::Result waitForFencesResult = device->get().waitForFences({ imgRenderedFence.get() }, VK_TRUE, UINT64_MAX);
         if (waitForFencesResult != vk::Result::eSuccess)
         {
@@ -169,6 +168,8 @@ int main()
         }
 
         device->get().resetFences({ imgRenderedFence.get() });
+        
+        writeUniformBuffer(pUniformBufMem, *device, *uniformBufMem, deltaTime);
         
         uint32_t imgIndex = acquireImgResult.value;
     
@@ -195,8 +196,8 @@ int main()
         (*cmdBufs)[0]->bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->get());
         (*cmdBufs)[0]->bindVertexBuffers(0, { vertexBuf->get() }, { 0 }); 
         (*cmdBufs)[0]->bindIndexBuffer(indexBuf->get(), 0, vk::IndexType::eUint16);
-        (*cmdBufs)[0]->drawIndexed(indices.size(), 1, 0, 0, 0);
         (*cmdBufs)[0]->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, descpriptorPipelineLayout->get(), 0, { (*descSets)[0].get() }, {});
+        (*cmdBufs)[0]->drawIndexed(indices.size(), 1, 0, 0, 0);
     
         (*cmdBufs)[0]->endRenderPass();
 
@@ -246,8 +247,9 @@ int main()
         deltaTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - sT).count();
     }
 
+    unmapUniformBuffer(*device, *uniformBufMem);
+
     graphicsQueue.waitIdle();
-    disposeUniformBuffer(*device, *uniformBufMem);
     glfwTerminate();
 
     return EXIT_SUCCESS;
