@@ -34,7 +34,7 @@ std::vector<Vertex> vertices = {
 
 std::vector<uint16_t> indices = { 0, 1, 2, 1, 0, 3 };
 
-SceneData sceneData = { Vec2{ 0.3, -0.2 } };
+SceneData sceneData;
 
 std::shared_ptr<vk::UniqueBuffer> getVertexBuffer(vk::UniqueDevice& device)
 {
@@ -408,9 +408,14 @@ std::shared_ptr<vk::UniqueDeviceMemory> getUniformBufferMemory(vk::UniqueDevice&
     return result;
 }
 
-void writeUniformBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& uniformBufMem)
+void writeUniformBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& uniformBufMem, int deltaTime)
 {
+    static float time = 0;
+
     void* pUniformBufMem = device.get().mapMemory(uniformBufMem.get(), 0, sizeof(SceneData));
+
+    sceneData.rectCenter = Vec2{ 0.3f * cosf(time), 0.3f * sinf(time) };
+    time += deltaTime / 1000.0f;
 
     std::memcpy(pUniformBufMem, &sceneData, sizeof(SceneData));
 
@@ -420,6 +425,11 @@ void writeUniformBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& unifor
     flushMemoryRange.size = sizeof(SceneData);
 
     device.get().flushMappedMemoryRanges({ flushMemoryRange });
+    // device.get().unmapMemory(uniformBufMem.get());
+}
+
+void disposeUniformBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& uniformBufMem)
+{
     device.get().unmapMemory(uniformBufMem.get());
 }
 

@@ -1,5 +1,6 @@
 #include <iostream>
 #include <memory>
+#include <chrono>
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
 #include "../include/Utility.hpp"
@@ -70,7 +71,6 @@ int main()
 
     std::shared_ptr<vk::UniqueBuffer> uniformBuf = getUniformBuffer(*device);
     std::shared_ptr<vk::UniqueDeviceMemory> uniformBufMem = getUniformBufferMemory(*device, physicalDevice, *uniformBuf);
-    writeUniformBuffer(*device, *uniformBufMem);
     std::shared_ptr<std::vector<vk::UniqueDescriptorSetLayout>> descSetLayouts = getDiscriptorSetLayouts(*device);
     std::shared_ptr<std::vector<vk::DescriptorSetLayout>> unwrapedDescSetLayouts = unwrapHandles<vk::DescriptorSetLayout, vk::UniqueDescriptorSetLayout>(*descSetLayouts);
     std::shared_ptr<vk::UniqueDescriptorPool> descPool = getDescriptorPool(*device);
@@ -135,9 +135,16 @@ int main()
     fenceCreateInfo.flags = vk::FenceCreateFlagBits::eSignaled;
     vk::UniqueFence imgRenderedFence = device->get().createFenceUnique(fenceCreateInfo);
 
+    int deltaTime = 0;
+    std::chrono::system_clock::time_point sT;
+
     while (!glfwWindowShouldClose(window.get()))
     {
+        sT = std::chrono::system_clock::now();
+        
         glfwPollEvents();
+
+        writeUniformBuffer(*device, *uniformBufMem, deltaTime);
         
         vk::Result waitForFencesResult = device->get().waitForFences({ imgRenderedFence.get() }, VK_TRUE, UINT64_MAX);
         if (waitForFencesResult != vk::Result::eSuccess)
@@ -235,9 +242,12 @@ int main()
             LOGERR("Failed to get next frame");
             return EXIT_FAILURE;
         }
+
+        deltaTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - sT).count();
     }
 
     graphicsQueue.waitIdle();
+    disposeUniformBuffer(*device, *uniformBufMem);
     glfwTerminate();
 
     return EXIT_SUCCESS;
