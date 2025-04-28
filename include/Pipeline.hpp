@@ -10,6 +10,20 @@
 
 using namespace Vulkan_Test;
 
+std::shared_ptr<vk::UniquePipelineLayout> getDescpriptorPipelineLayout(vk::UniqueDevice& device, std::vector<vk::DescriptorSetLayout>& descSetLayouts, std::vector<vk::PushConstantRange>& pushConstantRanges)
+{
+    std::shared_ptr<vk::UniquePipelineLayout> result = std::make_shared<vk::UniquePipelineLayout>();
+
+    vk::PipelineLayoutCreateInfo layoutCreateInfo;
+    layoutCreateInfo.setLayoutCount = descSetLayouts.size();
+    layoutCreateInfo.pSetLayouts = descSetLayouts.data();
+    layoutCreateInfo.pushConstantRangeCount = pushConstantRanges.size();
+    layoutCreateInfo.pPushConstantRanges = pushConstantRanges.data();
+
+    *result = device->createPipelineLayoutUnique(layoutCreateInfo);
+    return result;
+}
+
 std::shared_ptr<vk::UniquePipeline> getPipeline(
     vk::UniqueDevice& device, 
     vk::UniqueRenderPass& renderpass, 

@@ -25,6 +25,10 @@ struct SceneData {
     Vec2 rectCenter;
 };
 
+struct SceneData2 {
+    Vec3 color;
+};
+
 std::vector<Vertex> vertices = {
     Vertex{ Vec2{-0.5f, -0.5f }, Vec3{ 0.0, 0.0, 1.0 } },
     Vertex{ Vec2{ 0.5f,  0.5f }, Vec3{ 0.0, 1.0, 0.0 } },
@@ -35,6 +39,7 @@ std::vector<Vertex> vertices = {
 std::vector<uint16_t> indices = { 0, 1, 2, 1, 0, 3 };
 
 SceneData sceneData;
+SceneData2 sceneData2;
 
 std::shared_ptr<vk::UniqueBuffer> getVertexBuffer(vk::UniqueDevice& device)
 {
@@ -416,7 +421,7 @@ void writeUniformBuffer(void* pUniformBufMem, vk::UniqueDevice& device, vk::Uniq
 {
     static float time = 0;
 
-    sceneData.rectCenter = Vec2{ 0.3f * cosf(time), 0.3f * sinf(time) };
+    sceneData.rectCenter = Vec2{ 0.3f * std::cos(time), 0.3f * std::sin(time) };
     time += deltaTime / 1000.0f;
 
     std::memcpy(pUniformBufMem, &sceneData, sizeof(SceneData));
@@ -558,16 +563,27 @@ void writeDescriptorSets(vk::UniqueDevice& device, std::vector<vk::UniqueDescrip
     device->updateDescriptorSets({ writeDescSet }, {});
 }
 
-std::shared_ptr<vk::UniquePipelineLayout> getDescpriptorPipelineLayout(vk::UniqueDevice& device, std::vector<vk::DescriptorSetLayout>& descSetLayouts)
+
+std::shared_ptr<std::vector<vk::PushConstantRange>> getPushConstantRanges()
 {
-    std::shared_ptr<vk::UniquePipelineLayout> result = std::make_shared<vk::UniquePipelineLayout>();
+    std::shared_ptr<std::vector<vk::PushConstantRange>> result = std::make_shared<std::vector<vk::PushConstantRange>>();
 
-    vk::PipelineLayoutCreateInfo layoutCreateInfo;
-    layoutCreateInfo.setLayoutCount = descSetLayouts.size();
-    layoutCreateInfo.pSetLayouts = descSetLayouts.data();
+    vk::PushConstantRange pushConstantRange;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(SceneData2);
+    pushConstantRange.stageFlags = vk::ShaderStageFlagBits::eVertex;
 
-    *result = device->createPipelineLayoutUnique(layoutCreateInfo);
+    (*result).push_back(pushConstantRange);
     return result;
+}
+
+void writePushConstant(int deltaTime)
+{
+    static float time = 0;
+
+    time += deltaTime / 1000.0f;
+
+    sceneData2.color = {std::sin(time), std::cos(time), 0};
 }
 
 std::shared_ptr<std::vector<vk::VertexInputBindingDescription>> getVertexBindingDescription()

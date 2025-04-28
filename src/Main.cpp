@@ -77,8 +77,10 @@ int main()
     std::shared_ptr<vk::UniqueDescriptorPool> descPool = getDescriptorPool(*device);
     std::shared_ptr<std::vector<vk::UniqueDescriptorSet>> descSets = getDescprotorSets(*device, *descPool, *unwrapedDescSetLayouts);
     writeDescriptorSets(*device, *descSets, *uniformBuf);
-    std::shared_ptr<vk::UniquePipelineLayout> descpriptorPipelineLayout = getDescpriptorPipelineLayout(*device, *unwrapedDescSetLayouts);
 
+    std::shared_ptr<std::vector<vk::PushConstantRange>> pushConstantRanges = getPushConstantRanges();
+
+    std::shared_ptr<vk::UniquePipelineLayout> descpriptorPipelineLayout = getDescpriptorPipelineLayout(*device, *unwrapedDescSetLayouts, *pushConstantRanges);
     std::shared_ptr<vk::SurfaceCapabilitiesKHR> surfaceCapabilities = getSurfaceCapabilities(physicalDevice, *surface);
     std::shared_ptr<std::vector<vk::SurfaceFormatKHR>> surfaceFormats = getSurfaceFormats(physicalDevice, *surface);
     std::shared_ptr<std::vector<vk::PresentModeKHR>> surfacePresentModes = getSurfacePresentModes(physicalDevice, *surface);
@@ -170,6 +172,7 @@ int main()
         device->get().resetFences({ imgRenderedFence.get() });
         
         writeUniformBuffer(pUniformBufMem, *device, *uniformBufMem, deltaTime);
+        writePushConstant(deltaTime);
         
         uint32_t imgIndex = acquireImgResult.value;
     
@@ -197,6 +200,7 @@ int main()
         (*cmdBufs)[0]->bindVertexBuffers(0, { vertexBuf->get() }, { 0 }); 
         (*cmdBufs)[0]->bindIndexBuffer(indexBuf->get(), 0, vk::IndexType::eUint16);
         (*cmdBufs)[0]->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, descpriptorPipelineLayout->get(), 0, { (*descSets)[0].get() }, {});
+        (*cmdBufs)[0]->pushConstants(descpriptorPipelineLayout->get(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(SceneData2), &sceneData2);
         (*cmdBufs)[0]->drawIndexed(indices.size(), 1, 0, 0, 0);
     
         (*cmdBufs)[0]->endRenderPass();
