@@ -5,15 +5,15 @@ layout(set = 0, binding = 0) uniform SceneData {
     vec2 rectCenter;
 } sceneData;
 
-layout(push_constant) uniform SceneData2 {
-    vec3 color;
-} sceneData2;
+layout(push_constant) uniform CameraData {
+    mat4 mvpMatrix;
+} cameraData;
 
-layout(location = 0) in vec2 inPos;
+layout(location = 0) in vec3 inPos;
 layout(location = 1) in vec3 inColor;
 layout(location = 0) out vec3 fragmentColor;
 
 void main() {
-    gl_Position = vec4(sceneData.rectCenter + inPos, 0.0, 1.0);
-    fragmentColor = inColor + sceneData2.color;
+    gl_Position = cameraData.mvpMatrix * vec4(inPos, 1.0);
+    fragmentColor = inColor;
 }

@@ -16,8 +16,12 @@ struct Vec3 {
     float x, y, z;
 };
 
+struct Mat4x4 {
+    float v[4][4];
+};
+
 struct Vertex {
-    Vec2 pos;
+    Vec3 pos;
     Vec3 color;
 };
 
@@ -25,21 +29,39 @@ struct SceneData {
     Vec2 rectCenter;
 };
 
-struct SceneData2 {
-    Vec3 color;
+struct CameraData {
+    Mat4x4 mvpMatrix;
 };
+
+Mat4x4 operator*(const Mat4x4 &a, const Mat4x4 &b) {
+    Mat4x4 c = {};
+    for(int i = 0; i < 4; i++)
+        for(int j = 0; j < 4; j++)
+            for(int k = 0; k < 4; k++)
+                c.v[i][j] += a.v[k][j] * b.v[i][k];
+    return c;
+}
 
 std::vector<Vertex> vertices = {
-    Vertex{ Vec2{-0.5f, -0.5f }, Vec3{ 0.0, 0.0, 1.0 } },
-    Vertex{ Vec2{ 0.5f,  0.5f }, Vec3{ 0.0, 1.0, 0.0 } },
-    Vertex{ Vec2{-0.5f,  0.5f }, Vec3{ 1.0, 0.0, 0.0 } },
-    Vertex{ Vec2{ 0.5f, -0.5f }, Vec3{ 1.0, 1.0, 1.0 } },
+    Vertex{Vec3{-0.5f, -0.5f, 0.5f}, Vec3{0.0, 0.0, 1.0}},
+    Vertex{Vec3{0.5f, 0.5f, 0.5f}, Vec3{0.0, 1.0, 0.0}},
+    Vertex{Vec3{0.5f, -0.5f, 0.5f}, Vec3{1.0, 1.0, 1.0}},
+    Vertex{Vec3{-0.5f, 0.5f, 0.5f}, Vec3{1.0, 0.0, 0.0}},
+    
+    Vertex{Vec3{-0.5f, -0.5f, -0.5f}, Vec3{0.0, 0.0, 1.0}},
+    Vertex{Vec3{0.5f, 0.5f, -0.5f}, Vec3{0.0, 1.0, 0.0}},
+    Vertex{Vec3{0.5f, -0.5f, -0.5f}, Vec3{1.0, 1.0, 1.0}},
+    Vertex{Vec3{-0.5f, 0.5f, -0.5f}, Vec3{1.0, 0.0, 0.0}},
 };
 
-std::vector<uint16_t> indices = { 0, 1, 2, 1, 0, 3 };
+std::vector<uint16_t> indices = {
+    0, 1, 2, 1, 0, 3, 5, 4, 6, 4, 5, 7, 
+    4, 3, 0, 3, 4, 7, 1, 6, 2, 6, 1, 5,
+    7, 1, 3, 1, 7, 5, 6, 0, 2, 0, 6, 4
+};
 
 SceneData sceneData;
-SceneData2 sceneData2;
+CameraData cameraData;
 
 std::shared_ptr<vk::UniqueBuffer> getVertexBuffer(vk::UniqueDevice& device)
 {
@@ -224,6 +246,89 @@ void sendVertexBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Q
 
     graphicsQueue.submit({submitInfo});
     graphicsQueue.waitIdle();
+}
+
+std::shared_ptr<std::vector<vk::VertexInputBindingDescription>> getVertexBindingDescription()
+{
+    std::shared_ptr<std::vector<vk::VertexInputBindingDescription>> result = std::make_shared<std::vector<vk::VertexInputBindingDescription>>();
+
+    // このままではバッファがどういう形式で頂点のデータを持っているのか、Vulkanのシステム側には分からない
+    // Vertex構造体というこちらが勝手に定義してみただけの構造体のことは知りようがない
+    // このままではシェーダに読み込ませられない
+    // そこで頂点入力デスクリプションというものを用意する
+    // 適切な説明(デスクリプション)を与えることで「こういう形式でこういうデータが入っている」という情報を与えることができる
+    // データだけでなく説明を与えて初めてシェーダからデータを読み込める
+
+    // 頂点入力デスクリプションには2種類ある
+    // アトリビュートデスクリプション(vk::VertexInputAttributeDescription)
+    // バインディングデスクリプション(vk::VertexInputBindingDescription)
+    // これはひとえに、シェーダに与えるデータを分ける単位が「バインディング」と「アトリビュート」の2段階あるため
+
+    // バインディングが一番上の単位
+    // 基本的に1つのバインディングに対して1つのバッファ(の範囲)が結び付けられる
+    // あるバインディングに含まれるデータは一定の大きさごとに切り分けられ、各頂点のデータとして解釈される
+    // アトリビュートはより細かい単位になる
+    // 1つの頂点のデータは、1つまたは複数のアトリビュートとして分けられる
+    // 一つの頂点データは「座標」とか「色」みたいな複数のデータを内包していますが、この1つ1つのデータが1つのアトリビュートに相当することになる
+    // (注意点として、1つのアトリビュートは「多次元ベクトル」や「行列」だったりできるので、アトリビュートは「x座標」とか「y座標」みたいな単位よりはもう少し大きい単位になる)
+
+    // バインディングデスクリプションは、1つのバインディングのデータをどうやって各頂点のデータに分割するかという情報を設定する。
+    // 具体的には、1つの頂点データのバイト数などを設定する。
+    // そしてアトリビュートデスクリプションは、1つの頂点データのどの位置からどういう形式でアトリビュートのデータを取り出すかという情報を設定する。
+    // アトリビュートデスクリプションはアトリビュートの数だけ作成する。
+    // 1つの頂点データが3種類のデータを含んでいるならば、3つのアトリビュートデスクリプションを作らなければならない。
+    // 今回のデータだと含んでいるデータは「座標」だけなので1つだけになるが、複数のアトリビュートを含む場合はその数だけ作成する。
+
+    // bindingは説明の対象となるバインディングの番号である。各頂点入力バインディングには0から始まる番号が振ってある。ここでは0番を使うことにする。
+    // strideは1つのデータを取り出す際の刻み幅である。つまり上の図でいう所の「1つの頂点データ」の大きさである。ここではVertex構造体のバイト数を指定している。
+    // 前節までで用意したデータはVertex構造体が並んでいるわけなので、各データを取り出すには当然Vertex構造体のバイト数ずつずらして読み取ることになる。
+    // inputRateにはvk::VertexInputRate::eVertexを指定する。1頂点ごとにデータを読み込む、というだけの意味である。インスタンス化というものを行う場合に別の値を指定する。
+    vk::VertexInputBindingDescription vertexBindingDescription;
+    vertexBindingDescription.binding = 0;
+    vertexBindingDescription.stride = sizeof(Vertex);
+    vertexBindingDescription.inputRate = vk::VertexInputRate::eVertex;
+
+    (*result).push_back(vertexBindingDescription);
+    return result;
+}
+
+std::shared_ptr<std::vector<vk::VertexInputAttributeDescription>> getVertexInputDescription()
+{
+    std::shared_ptr<std::vector<vk::VertexInputAttributeDescription>> result = std::make_shared<std::vector<vk::VertexInputAttributeDescription>>();
+
+    // アトリビュートの読み込み方の説明情報
+    // 今度は vk::VertexInputAttributeDescription を用意する
+    // 今回用意した頂点データが含む情報は「座標」だけなので、用意するアトリビュートデスクリプションは1つだけ
+    //
+    // bindingはデータの読み込み元のバインディングの番号を指定。上で0番のバインディングを使うことにしたので、ここでも0にする。
+    // locationはシェーダにデータを渡す際のデータ位置。
+    //
+    // 頂点データの用意に書いたシェーダのコードを見てみる
+    // layout(location = 0) in vec2 inPos;
+    // location = 0という部分がある。シェーダがアトリビュートのデータを受け取る際はこのようにデータ位置を指定する。
+    // このlayout(location = xx)の指定とアトリビュートデスクリプションのlocationの位置は対応付けて書かなければならない。
+    // locationの対応付けによって、シェーダで読み込む変数とVulkanが用意したアトリビュートの対応が付くのである。
+    //
+    // formatはデータ形式である。今回渡すのは32bitのfloat型が2つある2次元ベクトルなので、それを表すeR32G32Sfloatを指定する。
+    // ここで使われているvk::Formatは本来ピクセルの色データのフォーマットを表すものなのでRとかGとか入っているが、それらはここでは無視してほしい。
+    // ここでは 「32bit, 32bit, それぞれSigned(符号付)floatである」という意味を表すためだけにこれが指定されている。
+    // ちなみにfloat型の3次元ベクトルを渡す際にはeR32G32B32Sfloatとか指定する。ここでもRGBの文字に深い意味はない。
+    // 色のデータを渡すにしろ座標データを渡すにしろこういう名前の値を指定する。違和感があるかもしれないが、こういうものなので仕方ない。
+    // offsetは頂点データのどの位置からデータを取り出すかを示す値。今回は1つしかアトリビュートが無いので0を指定しているが、複数のアトリビュートがある場合にはとても重要なものである。
+    (*result).push_back(vk::VertexInputAttributeDescription());
+    (*result).push_back(vk::VertexInputAttributeDescription());
+
+    (*result)[0].binding = 0;
+    (*result)[0].location = 0;
+    (*result)[0].format = vk::Format::eR32G32B32Sfloat;
+    (*result)[0].offset = offsetof(Vertex, pos);
+    
+    (*result)[1].binding = 0;
+    (*result)[1].location = 1;
+    (*result)[1].format = vk::Format::eR32G32B32Sfloat;
+    (*result)[1].offset = offsetof(Vertex, color);
+
+    return result;
 }
 
 std::shared_ptr<vk::UniqueBuffer> getIndexBuffer(vk::UniqueDevice& device)
@@ -563,108 +668,98 @@ void writeDescriptorSets(vk::UniqueDevice& device, std::vector<vk::UniqueDescrip
     device->updateDescriptorSets({ writeDescSet }, {});
 }
 
+Mat4x4 scaleMatrix(float scale) 
+{
+    return Mat4x4{{
+        {scale, 0, 0, 0},
+        {0, scale, 0, 0},
+        {0, 0, scale, 0},
+        {0, 0, 0, 1},
+    }};
+}
+
+Mat4x4 rotationMatrix(Vec3 n, float theta) 
+{
+    float c = cos(theta);
+    float s = sin(theta);
+    float nc = 1 - c;
+
+    return Mat4x4{{
+        {n.x * n.x * nc + c,       n.x * n.y * nc + n.z * s, n.x * n.z * nc - n.y * s, 0},
+        {n.y * n.x * nc - n.z * s, n.y * n.y * nc + c,       n.y * n.z * nc + n.x * s, 0},
+        {n.z * n.x * nc + n.y * s, n.z * n.y * nc - n.x * s, n.z * n.z * nc + c,       0},
+        {0, 0, 0, 1},
+    }};
+}
+
+Mat4x4 translationMatrix(Vec3 v) 
+{
+    return Mat4x4{{
+        {1, 0, 0, 0},
+        {0, 1, 0, 0},
+        {0, 0, 1, 0},
+        {v.x, v.y, v.z, 1},
+    }};
+}
+
+Mat4x4 viewMatrix(Vec3 cameraPos, Vec3 dir, Vec3 up) 
+{
+    const auto cameraShift = 
+        Mat4x4{{
+            {1, 0, 0, 0},
+            {0, 1, 0, 0},
+            {0, 0, 1, 0},
+            {-cameraPos.x, -cameraPos.y, -cameraPos.z, 1},
+        }};
+    const auto cameraRotation = 
+        Mat4x4{{
+            {up.z * dir.y - up.y * dir.z, -up.x, dir.x, 0},
+            {up.x * dir.z - up.z * dir.x, -up.y, dir.y, 0},
+            {up.y * dir.x - up.x * dir.y, -up.z, dir.z, 0},
+            {0, 0, 0, 1},
+        }};
+
+    return cameraRotation * cameraShift;
+}
+
+Mat4x4 projectionMatrix(float angle_y, float ratio, float near, float far) 
+{
+    float ky = tan(angle_y);
+    float kx = ky * ratio;
+
+    return Mat4x4{{
+        {kx, 0, 0, 0},
+        {0, ky, 0, 0},
+        {0, 0, far/(far-near), 1},
+        {0, 0, -near*far/(far-near), 0}
+    }};
+}
 
 std::shared_ptr<std::vector<vk::PushConstantRange>> getPushConstantRanges()
 {
+    // 小さい数値データはプッシュ定数、大きなバッファやテクスチャ画像などのデータはデスクリプタを使う
+    // プッシュ定数は128バイトまでしか容量を保証されていない(最低保証)
     std::shared_ptr<std::vector<vk::PushConstantRange>> result = std::make_shared<std::vector<vk::PushConstantRange>>();
 
     vk::PushConstantRange pushConstantRange;
     pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(SceneData2);
+    pushConstantRange.size = sizeof(CameraData);
     pushConstantRange.stageFlags = vk::ShaderStageFlagBits::eVertex;
 
     (*result).push_back(pushConstantRange);
     return result;
 }
 
-void writePushConstant(int deltaTime)
+void writePushConstant(uint32_t screenWidth, uint32_t screenHeight, int deltaTime)
 {
     static float time = 0;
-
     time += deltaTime / 1000.0f;
 
-    sceneData2.color = {std::sin(time), std::cos(time), 0};
-}
+    float rotation = (time / 10) * 2 * 3.14f;
 
-std::shared_ptr<std::vector<vk::VertexInputBindingDescription>> getVertexBindingDescription()
-{
-    std::shared_ptr<std::vector<vk::VertexInputBindingDescription>> result = std::make_shared<std::vector<vk::VertexInputBindingDescription>>();
-
-    // このままではバッファがどういう形式で頂点のデータを持っているのか、Vulkanのシステム側には分からない
-    // Vertex構造体というこちらが勝手に定義してみただけの構造体のことは知りようがない
-    // このままではシェーダに読み込ませられない
-    // そこで頂点入力デスクリプションというものを用意する
-    // 適切な説明(デスクリプション)を与えることで「こういう形式でこういうデータが入っている」という情報を与えることができる
-    // データだけでなく説明を与えて初めてシェーダからデータを読み込める
-
-    // 頂点入力デスクリプションには2種類ある
-    // アトリビュートデスクリプション(vk::VertexInputAttributeDescription)
-    // バインディングデスクリプション(vk::VertexInputBindingDescription)
-    // これはひとえに、シェーダに与えるデータを分ける単位が「バインディング」と「アトリビュート」の2段階あるため
-
-    // バインディングが一番上の単位
-    // 基本的に1つのバインディングに対して1つのバッファ(の範囲)が結び付けられる
-    // あるバインディングに含まれるデータは一定の大きさごとに切り分けられ、各頂点のデータとして解釈される
-    // アトリビュートはより細かい単位になる
-    // 1つの頂点のデータは、1つまたは複数のアトリビュートとして分けられる
-    // 一つの頂点データは「座標」とか「色」みたいな複数のデータを内包していますが、この1つ1つのデータが1つのアトリビュートに相当することになる
-    // (注意点として、1つのアトリビュートは「多次元ベクトル」や「行列」だったりできるので、アトリビュートは「x座標」とか「y座標」みたいな単位よりはもう少し大きい単位になる)
-
-    // バインディングデスクリプションは、1つのバインディングのデータをどうやって各頂点のデータに分割するかという情報を設定する。
-    // 具体的には、1つの頂点データのバイト数などを設定する。
-    // そしてアトリビュートデスクリプションは、1つの頂点データのどの位置からどういう形式でアトリビュートのデータを取り出すかという情報を設定する。
-    // アトリビュートデスクリプションはアトリビュートの数だけ作成する。
-    // 1つの頂点データが3種類のデータを含んでいるならば、3つのアトリビュートデスクリプションを作らなければならない。
-    // 今回のデータだと含んでいるデータは「座標」だけなので1つだけになるが、複数のアトリビュートを含む場合はその数だけ作成する。
-
-    // bindingは説明の対象となるバインディングの番号である。各頂点入力バインディングには0から始まる番号が振ってある。ここでは0番を使うことにする。
-    // strideは1つのデータを取り出す際の刻み幅である。つまり上の図でいう所の「1つの頂点データ」の大きさである。ここではVertex構造体のバイト数を指定している。
-    // 前節までで用意したデータはVertex構造体が並んでいるわけなので、各データを取り出すには当然Vertex構造体のバイト数ずつずらして読み取ることになる。
-    // inputRateにはvk::VertexInputRate::eVertexを指定する。1頂点ごとにデータを読み込む、というだけの意味である。インスタンス化というものを行う場合に別の値を指定する。
-    vk::VertexInputBindingDescription vertexBindingDescription;
-    vertexBindingDescription.binding = 0;
-    vertexBindingDescription.stride = sizeof(Vertex);
-    vertexBindingDescription.inputRate = vk::VertexInputRate::eVertex;
-
-    (*result).push_back(vertexBindingDescription);
-    return result;
-}
-
-std::shared_ptr<std::vector<vk::VertexInputAttributeDescription>> getVertexInputDescription()
-{
-    std::shared_ptr<std::vector<vk::VertexInputAttributeDescription>> result = std::make_shared<std::vector<vk::VertexInputAttributeDescription>>();
-
-    // アトリビュートの読み込み方の説明情報
-    // 今度は vk::VertexInputAttributeDescription を用意する
-    // 今回用意した頂点データが含む情報は「座標」だけなので、用意するアトリビュートデスクリプションは1つだけ
-    //
-    // bindingはデータの読み込み元のバインディングの番号を指定。上で0番のバインディングを使うことにしたので、ここでも0にする。
-    // locationはシェーダにデータを渡す際のデータ位置。
-    //
-    // 頂点データの用意に書いたシェーダのコードを見てみる
-    // layout(location = 0) in vec2 inPos;
-    // location = 0という部分がある。シェーダがアトリビュートのデータを受け取る際はこのようにデータ位置を指定する。
-    // このlayout(location = xx)の指定とアトリビュートデスクリプションのlocationの位置は対応付けて書かなければならない。
-    // locationの対応付けによって、シェーダで読み込む変数とVulkanが用意したアトリビュートの対応が付くのである。
-    //
-    // formatはデータ形式である。今回渡すのは32bitのfloat型が2つある2次元ベクトルなので、それを表すeR32G32Sfloatを指定する。
-    // ここで使われているvk::Formatは本来ピクセルの色データのフォーマットを表すものなのでRとかGとか入っているが、それらはここでは無視してほしい。
-    // ここでは 「32bit, 32bit, それぞれSigned(符号付)floatである」という意味を表すためだけにこれが指定されている。
-    // ちなみにfloat型の3次元ベクトルを渡す際にはeR32G32B32Sfloatとか指定する。ここでもRGBの文字に深い意味はない。
-    // 色のデータを渡すにしろ座標データを渡すにしろこういう名前の値を指定する。違和感があるかもしれないが、こういうものなので仕方ない。
-    // offsetは頂点データのどの位置からデータを取り出すかを示す値。今回は1つしかアトリビュートが無いので0を指定しているが、複数のアトリビュートがある場合にはとても重要なものである。
-    (*result).push_back(vk::VertexInputAttributeDescription());
-    (*result).push_back(vk::VertexInputAttributeDescription());
-
-    (*result)[0].binding = 0;
-    (*result)[0].location = 0;
-    (*result)[0].format = vk::Format::eR32G32Sfloat;
-    (*result)[0].offset = offsetof(Vertex, pos);
+    Mat4x4 model = translationMatrix({0.0f, 0.0f, 0.0f}) * rotationMatrix({0.0f, 0.0f, 1.0f}, rotation) * scaleMatrix(1.0f);
+    Mat4x4 view = viewMatrix({0.0f, 2.0f, 2.0f}, {0.0f, -0.707f, -0.707f}, {0.0f, -0.707f, +0.707f});
+    Mat4x4 proj = projectionMatrix(3.14f / 3, float(screenHeight) / float(screenWidth), 0.1f, 100.0f);
     
-    (*result)[1].binding = 0;
-    (*result)[1].location = 1;
-    (*result)[1].format = vk::Format::eR32G32B32Sfloat;
-    (*result)[1].offset = offsetof(Vertex, color);
-
-    return result;
+    cameraData.mvpMatrix = proj * view * model;
 }

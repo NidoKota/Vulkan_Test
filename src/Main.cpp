@@ -130,9 +130,8 @@ int main()
 
     vk::SemaphoreCreateInfo semaphoreCreateInfo;
 
-    vk::UniqueSemaphore swapchainImgSemaphore, imgRenderedSemaphore;
-    swapchainImgSemaphore = device->get().createSemaphoreUnique(semaphoreCreateInfo);
-    imgRenderedSemaphore = device->get().createSemaphoreUnique(semaphoreCreateInfo);
+    vk::UniqueSemaphore swapchainImgSemaphore = device->get().createSemaphoreUnique(semaphoreCreateInfo);
+    vk::UniqueSemaphore imgRenderedSemaphore = device->get().createSemaphoreUnique(semaphoreCreateInfo);
 
     vk::FenceCreateInfo fenceCreateInfo;
     fenceCreateInfo.flags = vk::FenceCreateFlagBits::eSignaled;
@@ -172,7 +171,7 @@ int main()
         device->get().resetFences({ imgRenderedFence.get() });
         
         writeUniformBuffer(pUniformBufMem, *device, *uniformBufMem, deltaTime);
-        writePushConstant(deltaTime);
+        writePushConstant(screenWidth, screenHeight, deltaTime);
         
         uint32_t imgIndex = acquireImgResult.value;
     
@@ -200,7 +199,7 @@ int main()
         (*cmdBufs)[0]->bindVertexBuffers(0, { vertexBuf->get() }, { 0 }); 
         (*cmdBufs)[0]->bindIndexBuffer(indexBuf->get(), 0, vk::IndexType::eUint16);
         (*cmdBufs)[0]->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, descpriptorPipelineLayout->get(), 0, { (*descSets)[0].get() }, {});
-        (*cmdBufs)[0]->pushConstants(descpriptorPipelineLayout->get(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(SceneData2), &sceneData2);
+        (*cmdBufs)[0]->pushConstants(descpriptorPipelineLayout->get(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(CameraData), &cameraData);
         (*cmdBufs)[0]->drawIndexed(indices.size(), 1, 0, 0, 0);
     
         (*cmdBufs)[0]->endRenderPass();
