@@ -17,6 +17,7 @@
 #include "../include/Command.hpp"
 #include "../include/Instance.hpp"
 #include "../include/ShaderData.hpp"
+#include "../include/Texture.hpp"
 
 using namespace Vulkan_Test;
 
@@ -79,6 +80,13 @@ int main()
     writeDescriptorSets(*device, *descSets, *uniformBuf);
 
     std::shared_ptr<std::vector<vk::PushConstantRange>> pushConstantRanges = getPushConstantRanges();
+
+    int imgWidth, imgHeight, imgCh;
+    void* imgData = getImageData(&imgWidth, &imgHeight, &imgCh);
+    std::shared_ptr<vk::UniqueImage> image = getImage(*device, imgWidth, imgHeight, imgCh);
+    std::shared_ptr<vk::UniqueDeviceMemory> imgStagingBufMemory = getImageMemory(*device, physicalDevice, imgWidth, imgHeight, imgCh);
+    writeImageBuffer(*device, *imgStagingBufMemory, imgData, imgWidth, imgHeight, imgCh);
+    releaseImageData(imgData);
 
     std::shared_ptr<vk::UniquePipelineLayout> descpriptorPipelineLayout = getDescpriptorPipelineLayout(*device, *unwrapedDescSetLayouts, *pushConstantRanges);
     std::shared_ptr<vk::SurfaceCapabilitiesKHR> surfaceCapabilities = getSurfaceCapabilities(physicalDevice, *surface);

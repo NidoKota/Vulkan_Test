@@ -763,3 +763,81 @@ void writePushConstant(uint32_t screenWidth, uint32_t screenHeight, int deltaTim
     
     cameraData.mvpMatrix = proj * view * model;
 }
+
+std::shared_ptr<vk::UniqueImage> getImage(vk::UniqueDevice& device, int imgWidth, int imgHeight, int imgCh)
+{
+    std::shared_ptr<vk::UniqueImage> result = std::make_shared<vk::UniqueImage>();
+
+    vk::ImageCreateInfo texImgCreateInfo;
+    texImgCreateInfo.imageType = vk::ImageType::e2D;
+    texImgCreateInfo.extent = vk::Extent3D(imgWidth, imgHeight, 1);
+    texImgCreateInfo.mipLevels = 1;
+    texImgCreateInfo.arrayLayers = 1;
+    texImgCreateInfo.format = vk::Format::eR8G8B8A8Unorm;
+    texImgCreateInfo.tiling = vk::ImageTiling::eOptimal;
+    texImgCreateInfo.initialLayout = vk::ImageLayout::eUndefined;
+    texImgCreateInfo.usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
+    texImgCreateInfo.sharingMode = vk::SharingMode::eExclusive;
+    texImgCreateInfo.samples = vk::SampleCountFlagBits::e1;
+
+    *result = device->createImageUnique(texImgCreateInfo);
+    return result;
+}
+
+std::shared_ptr<vk::UniqueDeviceMemory> getImageMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, int imgWidth, int imgHeight, int imgCh)
+{
+    std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
+
+    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
+
+    size_t imgDataSize = imgCh * imgWidth * imgHeight;
+
+    vk::BufferCreateInfo imgStagingBufferCreateInfo;
+    imgStagingBufferCreateInfo.size = imgDataSize;
+    imgStagingBufferCreateInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
+    imgStagingBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
+
+    vk::UniqueBuffer imgStagingBuf = device->createBufferUnique(imgStagingBufferCreateInfo);
+
+    vk::MemoryRequirements imgStagingBufMemReq = device->getBufferMemoryRequirements(imgStagingBuf.get());
+
+    vk::MemoryAllocateInfo imgStagingBufMemAllocInfo;
+    imgStagingBufMemAllocInfo.allocationSize = imgStagingBufMemReq.size;
+
+    bool suitableMemoryTypeFound = false;
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
+    {
+        if (imgStagingBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible)) 
+        {
+            imgStagingBufMemAllocInfo.memoryTypeIndex = i;
+            suitableMemoryTypeFound = true;
+            break;
+        }
+    }
+    if (!suitableMemoryTypeFound) 
+    {
+        std::cerr << "適切なメモリタイプが存在しません。" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    *result = device.get().allocateMemoryUnique(imgStagingBufMemAllocInfo);
+    device.get().bindBufferMemory(imgStagingBuf.get(), result->get(), 0);
+    return result;
+}
+
+void writeImageBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& imgStagingBufMemory, void* pImgData, int imgWidth, int imgHeight, int imgCh)
+{
+    size_t imgDataSize = imgCh * imgWidth * imgHeight;
+    void *pImgStagingBufMem = device->mapMemory(imgStagingBufMemory.get(), 0, imgDataSize);
+
+    std::memcpy(pImgStagingBufMem, pImgData, imgDataSize);
+
+    vk::MappedMemoryRange flushMemoryRange;
+    flushMemoryRange.memory = imgStagingBufMemory.get();
+    flushMemoryRange.offset = 0;
+    flushMemoryRange.size = imgDataSize;
+
+    device->flushMappedMemoryRanges({flushMemoryRange});
+
+    device->unmapMemory(imgStagingBufMemory.get());
+}
