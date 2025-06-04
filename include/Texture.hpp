@@ -4,19 +4,22 @@
 #include <memory>
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
+#define STB_IMAGE_IMPLEMENTATION
+#include "../include/stb/stb_image.h"
 #include "Utility.hpp"
 #include "Debug.hpp"
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "../include/stb/stb_image.h"
-
 void* getImageData(int* imgWidth, int* imgHeight, int* imgCh)
 {
-    stbi_uc* pImgData = stbi_load("image.jpg", imgWidth, imgHeight, imgCh, STBI_rgb_alpha);
+    std::filesystem::path currentPath = std::filesystem::current_path();
+    std::filesystem::path imagePath = currentPath / ".." / "assets" / "image.jpg";
+    
+    // Vulkanに画像データを渡すには圧縮されていない生データでなければない
+    stbi_uc* pImgData = stbi_load(imagePath.c_str(), imgWidth, imgHeight, imgCh, STBI_rgb_alpha);
 
     if (pImgData == nullptr) 
     {
-       std::cerr << "画像ファイルの読み込みに失敗しました。" << std::endl;
+       std::cerr << "Failed to load image file." << std::endl;
        exit(EXIT_FAILURE);
     }
 

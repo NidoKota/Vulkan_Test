@@ -776,7 +776,11 @@ std::shared_ptr<vk::UniqueImage> getImage(vk::UniqueDevice& device, int imgWidth
     texImgCreateInfo.format = vk::Format::eR8G8B8A8Unorm;
     texImgCreateInfo.tiling = vk::ImageTiling::eOptimal;
     texImgCreateInfo.initialLayout = vk::ImageLayout::eUndefined;
+
+    // vk::ImageUsageFlagBits::eSampledフラグはテクスチャサンプリングに使うことを示す
+    // vk::ImageUsageFlagBits::eTransferDstはステージングバッファからデータを転送することを示す
     texImgCreateInfo.usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
+
     texImgCreateInfo.sharingMode = vk::SharingMode::eExclusive;
     texImgCreateInfo.samples = vk::SampleCountFlagBits::e1;
 
@@ -784,12 +788,8 @@ std::shared_ptr<vk::UniqueImage> getImage(vk::UniqueDevice& device, int imgWidth
     return result;
 }
 
-std::shared_ptr<vk::UniqueDeviceMemory> getImageMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, int imgWidth, int imgHeight, int imgCh)
+std::shared_ptr<vk::UniqueBuffer> getImageBuffer(vk::UniqueDevice& device, int imgWidth, int imgHeight, int imgCh)
 {
-    std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
-
-    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
-
     size_t imgDataSize = imgCh * imgWidth * imgHeight;
 
     vk::BufferCreateInfo imgStagingBufferCreateInfo;
@@ -798,6 +798,13 @@ std::shared_ptr<vk::UniqueDeviceMemory> getImageMemory(vk::UniqueDevice& device,
     imgStagingBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
 
     vk::UniqueBuffer imgStagingBuf = device->createBufferUnique(imgStagingBufferCreateInfo);
+}
+
+std::shared_ptr<vk::UniqueDeviceMemory> getImageMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueBuffer& imgStagingBuf, int imgWidth, int imgHeight, int imgCh)
+{
+    std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
+
+    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
 
     vk::MemoryRequirements imgStagingBufMemReq = device->getBufferMemoryRequirements(imgStagingBuf.get());
 
@@ -814,9 +821,9 @@ std::shared_ptr<vk::UniqueDeviceMemory> getImageMemory(vk::UniqueDevice& device,
             break;
         }
     }
-    if (!suitableMemoryTypeFound) 
+    if (!suitableMemoryTypeFound)
     {
-        std::cerr << "適切なメモリタイプが存在しません。" << std::endl;
+        LOGERR("Suitable memory type not found. ");
         exit(EXIT_FAILURE);
     }
 
@@ -840,4 +847,135 @@ void writeImageBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& imgStagi
     device->flushMappedMemoryRanges({flushMemoryRange});
 
     device->unmapMemory(imgStagingBufMemory.get());
+}
+
+void sendImageBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Queue& graphicsQueue, vk::UniqueBuffer& imgStagingBuf, vk::UniqueImage& texImage, int imgWidth, int imgHeight)
+{
+    vk::CommandPoolCreateInfo tmpCmdPoolCreateInfo;
+    tmpCmdPoolCreateInfo.queueFamilyIndex = queueFamilyIndex;
+    tmpCmdPoolCreateInfo.flags = vk::CommandPoolCreateFlagBits::eTransient;
+    vk::UniqueCommandPool tmpCmdPool = device->createCommandPoolUnique(tmpCmdPoolCreateInfo);
+
+    vk::CommandBufferAllocateInfo tmpCmdBufAllocInfo;
+    tmpCmdBufAllocInfo.commandPool = tmpCmdPool.get();
+    tmpCmdBufAllocInfo.commandBufferCount = 1;
+    tmpCmdBufAllocInfo.level = vk::CommandBufferLevel::ePrimary;
+    std::vector<vk::UniqueCommandBuffer> tmpCmdBufs = device->allocateCommandBuffersUnique(tmpCmdBufAllocInfo);
+
+    vk::CommandBufferBeginInfo cmdBeginInfo;
+    cmdBeginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+
+    tmpCmdBufs[0]->begin(cmdBeginInfo);
+    // 以前にバッファからバッファへデータをコピーしたときはvk::CommandBuffer::copyBuffer()を使用した
+    // 今回はバッファからイメージにデータをコピーするので、vk::CommandBuffer::copyBufferToImage()という別のコマンドを使用する
+    
+    // データをコピーするためにイメージレイアウトを適切に変換する
+    // 1. texImageのレイアウトをeTransferDstOptimalに変換
+    //     eTransferDstOptimalはデータのコピー先となるためのレイアウト
+    // 2. copyBufferToImage()でデータをtexImageにコピー
+    // 3. texImageのレイアウトをeShaderReadOnlyOptimalに変換 
+    //     eShaderReadOnlyOptimalは、シェーダからの読み込みアクセスのためのレイアウト
+    //     今回のようにテクスチャとして扱う場合にはこれを指定するのが最適
+
+    // 今回はパイプラインバリアを用いる
+    // 本来パイプラインバリアはフェンスやセマフォのように同期処理のための道具
+    // だがイメージのレイアウト変換という機能も副次的に付いているため、これを使う
+    // (レンダーパスも、主目的としてはGPUにおける処理の依存関係を表すものなのに、イメージレイアウトの変換処理も行っていた
+    // ある処理の中ではイメージをこう扱ってこちらの処理ではイメージをこう利用する...といったケースを考えると、処理の切れ目に変換が入るのは自然なのかも知れない
+
+    // 1
+    {
+        // vk::ImageMemoryBarrier構造体でイメージのメモリ保護および変換に関する情報を設定し、pipelineBarrier()の引数に渡す
+        vk::ImageMemoryBarrier barrior;
+        // oldLayoutとnewLayoutがレイアウトの変換を示している
+        // createImage()のところで指定しているように、イメージ作成時点ではeUndefinedなのでoldLayoutにはeUndefinedを指定
+        // なお、createImage()の時点でeTransferDstOptimalを指定することはできない
+        // createImage()で初期状態として指定できるのはeUndefinedもしくはePreinitialized
+        barrior.oldLayout = vk::ImageLayout::eUndefined;
+        barrior.newLayout = vk::ImageLayout::eTransferDstOptimal;
+        barrior.image = texImage.get();
+        // 他の引数はイメージのレイアウト変換ではなく、「同期処理」というパイプラインバリア本来の機能のための様々な指定
+        // srcQueueFamilyIndex / dstQueueFamilyIndexは、バリアの前と後で別のキューからイメージを扱う場合に使うも
+        // 今回は使わないのでVK_QUEUE_FAMILY_IGNOREDを指定
+        barrior.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrior.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrior.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+        barrior.subresourceRange.baseMipLevel = 0;
+        barrior.subresourceRange.levelCount = 1;
+        barrior.subresourceRange.baseArrayLayer = 0;
+        barrior.subresourceRange.layerCount = 1;
+        // srcAccessMask / dstAccessMaskにはそれぞれパイプラインバリアの前と後で対象のリソースに行うアクセス処理を示す
+        // これで処理の依存関係を示すことができる
+        // srcAccessMaskに指定した処理が終わるまで、dstAccessMaskに指定した処理は行われない
+        // ここでは終わるまで待つ必要のある処理は存在しないのでsrcAccessMaskは0
+        // 画像データのコピー処理はレイアウト変換が終わってから行われないと困るので、dstAccessMaskにeTransferWriteを指定する
+        barrior.srcAccessMask = vk::AccessFlagBits::eNone;
+        barrior.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+        // pipelineBarrierの第1,第2引数にはそれぞれパイプラインバリアの前と後で待たれるパイプラインステージを指定
+        // ここでも処理の依存関係を示すことができる
+        // 第1引数(バリアの前側)にeTopOfPipeを指定しているが、これは何も待たれないという意味
+        // 第2引数(バリアの後側)にeTransferを指定していますが、こちらはデータ転送処理の意味
+        //     データ転送はグラフィックスパイプラインのステージではないが、ここでは処理段階の一種としてこのように指定する
+        tmpCmdBufs[0]->pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, {barrior});
+    }
+
+    // 2
+    {
+        // コピー処理
+        vk::BufferImageCopy imgCopyRegion;
+        // bufferOffsetは、「バッファの何バイト目からのデータを使う」という情報を示す
+        imgCopyRegion.bufferOffset = 0;
+        imgCopyRegion.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+        imgCopyRegion.imageSubresource.mipLevel = 0;
+        imgCopyRegion.imageSubresource.baseArrayLayer = 0;
+        imgCopyRegion.imageSubresource.layerCount = 1;
+        // imageSubresource, imageOffset, imageExtentは画像のコピー先の位置を示すもの
+        // 見た通りなので詳細な説明は割愛
+        imgCopyRegion.imageOffset = vk::Offset3D{0, 0, 0};
+        imgCopyRegion.imageExtent = vk::Extent3D{uint32_t(imgWidth), uint32_t(imgHeight), 1};
+        
+        // bufferRowLength, bufferImageHeightは「バッファ上における」イメージの横・縦ピクセル数を示す
+        // 例えば転送先の大きさは100x100だけど、バッファ上には200x200の画像データがあるというケースも可能
+        // この場合はバッファ上のイメージの一部が切り取られてコピーされる
+        // 0を指定した場合は自動的にimageExtentと同じサイズという扱いになる
+        imgCopyRegion.bufferRowLength = 0;
+        imgCopyRegion.bufferImageHeight = 0;
+        
+        // copyBufferToImage()の第1引数がコピー元のバッファ、第2引数がコピー先のイメージ、第3引数がコピー先のイメージのレイアウト
+        // 第4引数にはvk:BufferImageCopy構造体を指定する
+        //     これは複数指定でき、いくつもの領域を同時にコピーできるようになっている
+        tmpCmdBufs[0]->copyBufferToImage(imgStagingBuf.get(), texImage.get(), vk::ImageLayout::eTransferDstOptimal, { imgCopyRegion });
+    }
+
+    // 3
+    {
+        vk::ImageMemoryBarrier barrior;
+        barrior.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+        barrior.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+        barrior.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrior.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrior.image = texImage.get();
+        barrior.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+        barrior.subresourceRange.baseMipLevel = 0;
+        barrior.subresourceRange.levelCount = 1;
+        barrior.subresourceRange.baseArrayLayer = 0;
+        barrior.subresourceRange.layerCount = 1;
+        // 同期処理のパラメータとしてsrcAccessMask、dstAccessMask、pipelineBarrier()の第1,第2引数も変えている
+        // データのコピーが終わるまでシェーダからアクセスするわけには行かない
+        // dstAccessMaskにeShaderReadを指定し、pipelineBarrier()の第2引数にはeFragmentShaderを指定
+        // ここではwaitIdleで丁寧に待っているので意味が薄いが、無駄な待ちを入れずどんどんコマンドを飛ばしていくのであれば意味が出テクス
+        barrior.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+        barrior.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+        tmpCmdBufs[0]->pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader, {}, {}, {}, {barrior});
+    }
+
+    tmpCmdBufs[0]->end();
+
+    vk::CommandBuffer submitCmdBuf[1] = {tmpCmdBufs[0].get()};
+    vk::SubmitInfo submitInfo;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = submitCmdBuf;
+
+    graphicsQueue.submit({submitInfo});
+    graphicsQueue.waitIdle();
 }
