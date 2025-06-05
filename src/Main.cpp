@@ -70,6 +70,27 @@ int main()
     writeStagingIndexBuffer(*device, *stagingIndexBufMem);
     sendIndexBuffer(*device, queueFamilyIndex, graphicsQueue, *stagingIndexBuf, *indexBuf);
 
+    LOG("1");
+    int imgWidth, imgHeight, imgCh;
+    std::shared_ptr<vk::UniqueImage> texImage = getImage(*device, imgWidth, imgHeight, imgCh);
+    imgWidth = 256;
+    imgHeight = 256;
+    imgCh = 4;
+    LOG("2");
+    std::shared_ptr<vk::UniqueBuffer> imagebuffer = getImageBuffer(*device, imgWidth, imgHeight, imgCh);
+    LOG("3");
+    std::shared_ptr<vk::UniqueDeviceMemory> imgStagingBufMemory = getImageMemory(*device, physicalDevice, *imagebuffer);
+    LOG("4");
+    void* imgData = getImageData(&imgWidth, &imgHeight, &imgCh);
+    LOG("5");
+    writeImageBuffer(*device, *imgStagingBufMemory, imgData, imgWidth, imgHeight, imgCh);
+    LOG("6");
+    sendImageBuffer(*device, queueFamilyIndex, graphicsQueue, *imagebuffer, *texImage, imgWidth, imgHeight);
+    LOG("7");
+    std::shared_ptr<vk::UniqueSampler> texSampler = getSampler(*device);
+    std::shared_ptr<vk::UniqueImageView> texImageView = getImageView(*device, *texImage);
+    releaseImageData(imgData);
+
     std::shared_ptr<vk::UniqueBuffer> uniformBuf = getUniformBuffer(*device);
     std::shared_ptr<vk::UniqueDeviceMemory> uniformBufMem = getUniformBufferMemory(*device, physicalDevice, *uniformBuf);
     void* pUniformBufMem = mapUniformBuffer(*device, *uniformBufMem);
@@ -77,16 +98,8 @@ int main()
     std::shared_ptr<std::vector<vk::DescriptorSetLayout>> unwrapedDescSetLayouts = unwrapHandles<vk::DescriptorSetLayout, vk::UniqueDescriptorSetLayout>(*descSetLayouts);
     std::shared_ptr<vk::UniqueDescriptorPool> descPool = getDescriptorPool(*device);
     std::shared_ptr<std::vector<vk::UniqueDescriptorSet>> descSets = getDescprotorSets(*device, *descPool, *unwrapedDescSetLayouts);
-    writeDescriptorSets(*device, *descSets, *uniformBuf);
-
+    writeDescriptorSets(*device, *descSets, *uniformBuf, *texImageView, *texSampler);
     std::shared_ptr<std::vector<vk::PushConstantRange>> pushConstantRanges = getPushConstantRanges();
-
-    int imgWidth, imgHeight, imgCh;
-    void* imgData = getImageData(&imgWidth, &imgHeight, &imgCh);
-    std::shared_ptr<vk::UniqueImage> image = getImage(*device, imgWidth, imgHeight, imgCh);
-    std::shared_ptr<vk::UniqueDeviceMemory> imgStagingBufMemory = getImageMemory(*device, physicalDevice, imgWidth, imgHeight, imgCh);
-    writeImageBuffer(*device, *imgStagingBufMemory, imgData, imgWidth, imgHeight, imgCh);
-    releaseImageData(imgData);
 
     std::shared_ptr<vk::UniquePipelineLayout> descpriptorPipelineLayout = getDescpriptorPipelineLayout(*device, *unwrapedDescSetLayouts, *pushConstantRanges);
     std::shared_ptr<vk::SurfaceCapabilitiesKHR> surfaceCapabilities = getSurfaceCapabilities(physicalDevice, *surface);

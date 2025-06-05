@@ -23,6 +23,7 @@ struct Mat4x4 {
 struct Vertex {
     Vec3 pos;
     Vec3 color;
+    Vec2 texUV;
 };
 
 struct SceneData {
@@ -43,15 +44,15 @@ Mat4x4 operator*(const Mat4x4 &a, const Mat4x4 &b) {
 }
 
 std::vector<Vertex> vertices = {
-    Vertex{Vec3{-0.5f, -0.5f, 0.5f}, Vec3{0.0, 0.0, 1.0}},
-    Vertex{Vec3{0.5f, 0.5f, 0.5f}, Vec3{0.0, 1.0, 0.0}},
-    Vertex{Vec3{0.5f, -0.5f, 0.5f}, Vec3{1.0, 1.0, 1.0}},
-    Vertex{Vec3{-0.5f, 0.5f, 0.5f}, Vec3{1.0, 0.0, 0.0}},
+    Vertex{Vec3{-0.5f, -0.5f, 0.5f}, Vec3{0.0, 0.0, 1.0}, Vec2{0.0, 0.0}},
+    Vertex{Vec3{0.5f, 0.5f, 0.5f}, Vec3{0.0, 1.0, 0.0}, Vec2{1.0, 1.0}},
+    Vertex{Vec3{0.5f, -0.5f, 0.5f}, Vec3{1.0, 1.0, 1.0}, Vec2{0.0, 1.0}},
+    Vertex{Vec3{-0.5f, 0.5f, 0.5f}, Vec3{1.0, 0.0, 0.0}, Vec2{1.0, 0.0}},
     
-    Vertex{Vec3{-0.5f, -0.5f, -0.5f}, Vec3{0.0, 0.0, 1.0}},
-    Vertex{Vec3{0.5f, 0.5f, -0.5f}, Vec3{0.0, 1.0, 0.0}},
-    Vertex{Vec3{0.5f, -0.5f, -0.5f}, Vec3{1.0, 1.0, 1.0}},
-    Vertex{Vec3{-0.5f, 0.5f, -0.5f}, Vec3{1.0, 0.0, 0.0}},
+    Vertex{Vec3{-0.5f, -0.5f, -0.5f}, Vec3{0.0, 0.0, 1.0}, Vec2{0.0, 0.0}},
+    Vertex{Vec3{0.5f, 0.5f, -0.5f}, Vec3{0.0, 1.0, 0.0}, Vec2{1.0, 1.0}},
+    Vertex{Vec3{0.5f, -0.5f, -0.5f}, Vec3{1.0, 1.0, 1.0}, Vec2{0.0, 1.0}},
+    Vertex{Vec3{-0.5f, 0.5f, -0.5f}, Vec3{1.0, 0.0, 0.0}, Vec2{1.0, 0.0}},
 };
 
 std::vector<uint16_t> indices = {
@@ -317,6 +318,7 @@ std::shared_ptr<std::vector<vk::VertexInputAttributeDescription>> getVertexInput
     // offsetは頂点データのどの位置からデータを取り出すかを示す値。今回は1つしかアトリビュートが無いので0を指定しているが、複数のアトリビュートがある場合にはとても重要なものである。
     (*result).push_back(vk::VertexInputAttributeDescription());
     (*result).push_back(vk::VertexInputAttributeDescription());
+    (*result).push_back(vk::VertexInputAttributeDescription());
 
     (*result)[0].binding = 0;
     (*result)[0].location = 0;
@@ -327,6 +329,12 @@ std::shared_ptr<std::vector<vk::VertexInputAttributeDescription>> getVertexInput
     (*result)[1].location = 1;
     (*result)[1].format = vk::Format::eR32G32B32Sfloat;
     (*result)[1].offset = offsetof(Vertex, color);
+
+    // イメージのuvを追加
+    (*result)[2].binding = 0;
+    (*result)[2].location = 2;
+    (*result)[2].format = vk::Format::eR32G32Sfloat;
+    (*result)[2].offset = offsetof(Vertex, texUV);
 
     return result;
 }
@@ -561,14 +569,19 @@ std::shared_ptr<std::vector<vk::UniqueDescriptorSetLayout>> getDiscriptorSetLayo
     // stageFlags はデータを渡す対象となるシェーダを示す 
     //    今回は頂点シェーダだけに渡すのでvk::ShaderStageFlagBits::eVertexを指定 フラグメントシェーダに渡したい場合はvk::ShaderStageFlagBits::eFragmentを指定します。ビットマスクなので、ORで重ねれば両方に渡すことも可能です。
 
-    vk::DescriptorSetLayoutBinding descSetLayoutBinding[1];
+    vk::DescriptorSetLayoutBinding descSetLayoutBinding[2];
     descSetLayoutBinding[0].binding = 0;
     descSetLayoutBinding[0].descriptorType = vk::DescriptorType::eUniformBuffer;
     descSetLayoutBinding[0].descriptorCount = 1;
     descSetLayoutBinding[0].stageFlags = vk::ShaderStageFlagBits::eVertex;
+    // 画像のサンプラーを追加
+    descSetLayoutBinding[1].binding = 1;
+    descSetLayoutBinding[1].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    descSetLayoutBinding[1].descriptorCount = 1;
+    descSetLayoutBinding[1].stageFlags = vk::ShaderStageFlagBits::eFragment;
     
     vk::DescriptorSetLayoutCreateInfo descSetLayoutCreateInfo{};
-    descSetLayoutCreateInfo.bindingCount = 1;
+    descSetLayoutCreateInfo.bindingCount = std::size(descSetLayoutBinding);;
     descSetLayoutCreateInfo.pBindings = descSetLayoutBinding;
     
     // デスクリプタセットレイアウトを作成したあとはそれをパイプラインレイアウトに設定する必要がある
@@ -586,9 +599,15 @@ std::shared_ptr<vk::UniqueDescriptorPool> getDescriptorPool(vk::UniqueDevice& de
     // 重要なこととしてデスクリプタには種類がある
     // そのためデスクリプタプールも、「この種類のデスクリプタをこの数」と指定して作成する必要がある
     // 必要な種類と数をきちんと指定する
-    vk::DescriptorPoolSize descPoolSize[1];
+    vk::DescriptorPoolSize descPoolSize[2];
     descPoolSize[0].type = vk::DescriptorType::eUniformBuffer;
     descPoolSize[0].descriptorCount = 1;
+    // 画像のサンプラーを追加
+    // eCombinedImageSamplerというタイプのデスクリプタを使用
+    // これはイメージとサンプラーを束ねた情報のデスクリプタ
+    // シェーダからテクスチャを利用できるようにする場合、イメージとサンプラーをセットで渡すのが一般的
+    descPoolSize[1].type = vk::DescriptorType::eCombinedImageSampler;
+    descPoolSize[1].descriptorCount = 1;
 
     // vk::DescriptorPoolSizeの配列を poolSizeCountとpPoolSizes に指定
     // vk::DescriptorPoolSizeはtypeがデスクリプタの種類でdescriptorCountがデスクリプタの数
@@ -628,7 +647,7 @@ std::shared_ptr<std::vector<vk::UniqueDescriptorSet>> getDescprotorSets(vk::Uniq
     return result;
 }
 
-void writeDescriptorSets(vk::UniqueDevice& device, std::vector<vk::UniqueDescriptorSet>& descSets, vk::UniqueBuffer& uniformBuf)
+void writeDescriptorSets(vk::UniqueDevice& device, std::vector<vk::UniqueDescriptorSet>& descSets, vk::UniqueBuffer& uniformBuf, vk::UniqueImageView& texImageView, vk::UniqueSampler& texSampler)
 {
     // 今はまだデスクリプタセットを作っただけでその中身は何もないので、updateDescriptorSetsで中身を設定する必要がある
     // デスクリプタへの書き込み情報はvk::WriteDescriptorSet構造体で表される
@@ -666,6 +685,28 @@ void writeDescriptorSets(vk::UniqueDevice& device, std::vector<vk::UniqueDescrip
     writeDescSet.pBufferInfo = descBufInfo;
     
     device->updateDescriptorSets({ writeDescSet }, {});
+
+    // ユニフォームバッファの時はvk::DescriptorBufferInfo構造体を使ったが、画像サンプラを設定する場合はvk::DescriptorImageInfo構造体を使用
+    // imegeViewにイメージビューを設定
+    // imageLayoutにイメージのレイアウトをeShaderReadOnlyOptimalに設定
+    // sampler にサンプラーを設定します。
+    // 作成したvk::DescriptorImageInfo構造体へのポインタは、vk::WriteDescriptorSetの pImageInfo に設定します。
+
+    vk::WriteDescriptorSet writeTexDescSet;
+    writeTexDescSet.dstSet = descSets[0].get();
+    writeTexDescSet.dstBinding = 1;
+    writeTexDescSet.dstArrayElement = 0;
+    writeTexDescSet.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+
+    vk::DescriptorImageInfo descImgInfo[1];
+    descImgInfo[0].imageView = texImageView.get();
+    descImgInfo[0].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    descImgInfo[0].sampler = texSampler.get();
+
+    writeTexDescSet.descriptorCount = std::size(descImgInfo);
+    writeTexDescSet.pImageInfo = descImgInfo;
+
+    device->updateDescriptorSets({ writeTexDescSet }, {});
 }
 
 Mat4x4 scaleMatrix(float scale) 
@@ -776,20 +817,56 @@ std::shared_ptr<vk::UniqueImage> getImage(vk::UniqueDevice& device, int imgWidth
     texImgCreateInfo.format = vk::Format::eR8G8B8A8Unorm;
     texImgCreateInfo.tiling = vk::ImageTiling::eOptimal;
     texImgCreateInfo.initialLayout = vk::ImageLayout::eUndefined;
-
-    // vk::ImageUsageFlagBits::eSampledフラグはテクスチャサンプリングに使うことを示す
-    // vk::ImageUsageFlagBits::eTransferDstはステージングバッファからデータを転送することを示す
-    texImgCreateInfo.usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
-
+    texImgCreateInfo.usage = vk::ImageUsageFlagBits::eSampled | 
+                            vk::ImageUsageFlagBits::eTransferDst;
     texImgCreateInfo.sharingMode = vk::SharingMode::eExclusive;
     texImgCreateInfo.samples = vk::SampleCountFlagBits::e1;
+    
+    try {
+        *result = device->createImageUnique(texImgCreateInfo);
+    } catch (vk::SystemError& err) {
+        LOGERR("Failed to create image: " << err.what());
+        exit(EXIT_FAILURE);
+    }
+    
+    return result;
+}
 
-    *result = device->createImageUnique(texImgCreateInfo);
+std::shared_ptr<vk::UniqueDeviceMemory> getImageMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueImage& texImage) // imgStagingBufの代わりにtexImageを使用
+{
+    std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
+
+    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
+    vk::MemoryRequirements imgMemReq = device->getImageMemoryRequirements(texImage.get()); // getBufferMemoryRequirementsの代わりにgetImageMemoryRequirementsを使用
+
+    vk::MemoryAllocateInfo imgMemAllocInfo;
+    imgMemAllocInfo.allocationSize = imgMemReq.size;
+
+    bool suitableMemoryTypeFound = false;
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
+    {
+        if (imgMemReq.memoryTypeBits & (1 << i) && 
+            (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal)) // eHostVisibleの代わりにeDeviceLocalを使用
+        {
+            imgMemAllocInfo.memoryTypeIndex = i;
+            suitableMemoryTypeFound = true;
+            break;
+        }
+    }
+    if (!suitableMemoryTypeFound)
+    {
+        LOGERR("Suitable memory type not found for image.");
+        exit(EXIT_FAILURE);
+    }
+
+    *result = device.get().allocateMemoryUnique(imgMemAllocInfo);
+    device.get().bindImageMemory(texImage.get(), result->get(), 0); // bindBufferMemoryの代わりにbindImageMemoryを使用
     return result;
 }
 
 std::shared_ptr<vk::UniqueBuffer> getImageBuffer(vk::UniqueDevice& device, int imgWidth, int imgHeight, int imgCh)
 {
+    std::shared_ptr<vk::UniqueBuffer> result = std::make_shared<vk::UniqueBuffer>();
     size_t imgDataSize = imgCh * imgWidth * imgHeight;
 
     vk::BufferCreateInfo imgStagingBufferCreateInfo;
@@ -797,38 +874,7 @@ std::shared_ptr<vk::UniqueBuffer> getImageBuffer(vk::UniqueDevice& device, int i
     imgStagingBufferCreateInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
     imgStagingBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
 
-    vk::UniqueBuffer imgStagingBuf = device->createBufferUnique(imgStagingBufferCreateInfo);
-}
-
-std::shared_ptr<vk::UniqueDeviceMemory> getImageMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueBuffer& imgStagingBuf, int imgWidth, int imgHeight, int imgCh)
-{
-    std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
-
-    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
-
-    vk::MemoryRequirements imgStagingBufMemReq = device->getBufferMemoryRequirements(imgStagingBuf.get());
-
-    vk::MemoryAllocateInfo imgStagingBufMemAllocInfo;
-    imgStagingBufMemAllocInfo.allocationSize = imgStagingBufMemReq.size;
-
-    bool suitableMemoryTypeFound = false;
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
-    {
-        if (imgStagingBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible)) 
-        {
-            imgStagingBufMemAllocInfo.memoryTypeIndex = i;
-            suitableMemoryTypeFound = true;
-            break;
-        }
-    }
-    if (!suitableMemoryTypeFound)
-    {
-        LOGERR("Suitable memory type not found. ");
-        exit(EXIT_FAILURE);
-    }
-
-    *result = device.get().allocateMemoryUnique(imgStagingBufMemAllocInfo);
-    device.get().bindBufferMemory(imgStagingBuf.get(), result->get(), 0);
+    *result = device->createBufferUnique(imgStagingBufferCreateInfo);
     return result;
 }
 
@@ -933,6 +979,11 @@ void sendImageBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Qu
         // 見た通りなので詳細な説明は割愛
         imgCopyRegion.imageOffset = vk::Offset3D{0, 0, 0};
         imgCopyRegion.imageExtent = vk::Extent3D{uint32_t(imgWidth), uint32_t(imgHeight), 1};
+        LOG("Image Width: " << imgWidth);
+        LOG("Image Height: " << imgHeight);
+        
+        LOG("Extent3Dwidth " << uint32_t(imgWidth));
+        LOG("Extent3Dheight" << uint32_t(imgHeight));
         
         // bufferRowLength, bufferImageHeightは「バッファ上における」イメージの横・縦ピクセル数を示す
         // 例えば転送先の大きさは100x100だけど、バッファ上には200x200の画像データがあるというケースも可能
@@ -947,6 +998,7 @@ void sendImageBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Qu
         tmpCmdBufs[0]->copyBufferToImage(imgStagingBuf.get(), texImage.get(), vk::ImageLayout::eTransferDstOptimal, { imgCopyRegion });
     }
 
+    LOGERR("x2");
     // 3
     {
         vk::ImageMemoryBarrier barrior;
@@ -968,14 +1020,72 @@ void sendImageBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Qu
         barrior.dstAccessMask = vk::AccessFlagBits::eShaderRead;
         tmpCmdBufs[0]->pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader, {}, {}, {}, {barrior});
     }
+    LOGERR("x3");
 
     tmpCmdBufs[0]->end();
 
+    LOGERR("x4");
     vk::CommandBuffer submitCmdBuf[1] = {tmpCmdBufs[0].get()};
     vk::SubmitInfo submitInfo;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = submitCmdBuf;
 
+    LOGERR("x5");
     graphicsQueue.submit({submitInfo});
+    LOGERR("x6");
     graphicsQueue.waitIdle();
+    LOGERR("x7");
+}
+
+std::shared_ptr<vk::UniqueSampler> getSampler(vk::UniqueDevice& device)
+{
+    std::shared_ptr<vk::UniqueSampler> result = std::make_shared<vk::UniqueSampler>();
+
+    vk::SamplerCreateInfo samplerCreateInfo;
+    // 補間用アルゴリズムを指定する
+    // ニアレストネイバー法はvk::Filter::eNearest
+    // 線型補間法はvk::Filter::eLinear
+    // 2つあるのはそれぞれ、画像の拡大時(magnification)・縮小時(minification)に対応
+    samplerCreateInfo.magFilter = vk::Filter::eLinear;
+    samplerCreateInfo.minFilter = vk::Filter::eLinear;
+    // addressModeU, addressModeV, addressModeWはそれぞれ、X/Y/Z軸においてテクスチャの範囲外の座標にアクセスした場合の挙動を示すもの
+    // vk::SamplerAddressMode::eRepeatを指定した場合、ドラゴンクエストのマップのように範囲外にアクセスすると反対側の端に戻って繰り返す
+    samplerCreateInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+    samplerCreateInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+    samplerCreateInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+    samplerCreateInfo.anisotropyEnable = false;
+    samplerCreateInfo.maxAnisotropy = 1.0f;
+    samplerCreateInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+    samplerCreateInfo.unnormalizedCoordinates = false;
+    samplerCreateInfo.compareEnable = false;
+    samplerCreateInfo.compareOp = vk::CompareOp::eAlways;
+    samplerCreateInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+    samplerCreateInfo.mipLodBias = 0.0f;
+    samplerCreateInfo.minLod = 0.0f;
+    samplerCreateInfo.maxLod = 0.0f;
+
+    *result = device->createSamplerUnique(samplerCreateInfo);
+    return result;
+}
+
+std::shared_ptr<vk::UniqueImageView> getImageView(vk::UniqueDevice& device, vk::UniqueImage& texImage)
+{
+    std::shared_ptr<vk::UniqueImageView> result = std::make_shared<vk::UniqueImageView>();
+
+    vk::ImageViewCreateInfo texImgViewCreateInfo;
+    texImgViewCreateInfo.image = texImage.get();
+    texImgViewCreateInfo.viewType = vk::ImageViewType::e2D;
+    texImgViewCreateInfo.format = vk::Format::eR8G8B8A8Unorm;
+    texImgViewCreateInfo.components.r = vk::ComponentSwizzle::eIdentity;
+    texImgViewCreateInfo.components.g = vk::ComponentSwizzle::eIdentity;
+    texImgViewCreateInfo.components.b = vk::ComponentSwizzle::eIdentity;
+    texImgViewCreateInfo.components.a = vk::ComponentSwizzle::eIdentity;
+    texImgViewCreateInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    texImgViewCreateInfo.subresourceRange.baseMipLevel = 0;
+    texImgViewCreateInfo.subresourceRange.levelCount = 1;
+    texImgViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+    texImgViewCreateInfo.subresourceRange.layerCount = 1;
+
+    *result = device->createImageViewUnique(texImgViewCreateInfo);
+    return result;
 }
