@@ -805,6 +805,9 @@ void writePushConstant(uint32_t screenWidth, uint32_t screenHeight, int deltaTim
     cameraData.mvpMatrix = proj * view * model;
 }
 
+
+
+
 std::shared_ptr<vk::UniqueImage> getImage(vk::UniqueDevice& device, int imgWidth, int imgHeight, int imgCh)
 {
     std::shared_ptr<vk::UniqueImage> result = std::make_shared<vk::UniqueImage>();
@@ -817,54 +820,18 @@ std::shared_ptr<vk::UniqueImage> getImage(vk::UniqueDevice& device, int imgWidth
     texImgCreateInfo.format = vk::Format::eR8G8B8A8Unorm;
     texImgCreateInfo.tiling = vk::ImageTiling::eOptimal;
     texImgCreateInfo.initialLayout = vk::ImageLayout::eUndefined;
-    texImgCreateInfo.usage = vk::ImageUsageFlagBits::eSampled | 
-                            vk::ImageUsageFlagBits::eTransferDst;
+    // vk::ImageUsageFlagBits::eSampledフラグを立ている
+    // これはイメージをテクスチャサンプリングに使うことを示している
+    // vk::ImageUsageFlagBits::eTransferDstが指定してあるのは、後でステージングバッファからデータを転送するから
+    texImgCreateInfo.usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
     texImgCreateInfo.sharingMode = vk::SharingMode::eExclusive;
     texImgCreateInfo.samples = vk::SampleCountFlagBits::e1;
     
-    try {
-        *result = device->createImageUnique(texImgCreateInfo);
-    } catch (vk::SystemError& err) {
-        LOGERR("Failed to create image: " << err.what());
-        exit(EXIT_FAILURE);
-    }
-    
+    *result = device->createImageUnique(texImgCreateInfo);
     return result;
 }
 
-std::shared_ptr<vk::UniqueDeviceMemory> getImageMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueImage& texImage) // imgStagingBufの代わりにtexImageを使用
-{
-    std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
-
-    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
-    vk::MemoryRequirements imgMemReq = device->getImageMemoryRequirements(texImage.get()); // getBufferMemoryRequirementsの代わりにgetImageMemoryRequirementsを使用
-
-    vk::MemoryAllocateInfo imgMemAllocInfo;
-    imgMemAllocInfo.allocationSize = imgMemReq.size;
-
-    bool suitableMemoryTypeFound = false;
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
-    {
-        if (imgMemReq.memoryTypeBits & (1 << i) && 
-            (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal)) // eHostVisibleの代わりにeDeviceLocalを使用
-        {
-            imgMemAllocInfo.memoryTypeIndex = i;
-            suitableMemoryTypeFound = true;
-            break;
-        }
-    }
-    if (!suitableMemoryTypeFound)
-    {
-        LOGERR("Suitable memory type not found for image.");
-        exit(EXIT_FAILURE);
-    }
-
-    *result = device.get().allocateMemoryUnique(imgMemAllocInfo);
-    device.get().bindImageMemory(texImage.get(), result->get(), 0); // bindBufferMemoryの代わりにbindImageMemoryを使用
-    return result;
-}
-
-std::shared_ptr<vk::UniqueBuffer> getImageBuffer(vk::UniqueDevice& device, int imgWidth, int imgHeight, int imgCh)
+std::shared_ptr<vk::UniqueBuffer> getImageStagingBuffer(vk::UniqueDevice& device, int imgWidth, int imgHeight, int imgCh)
 {
     std::shared_ptr<vk::UniqueBuffer> result = std::make_shared<vk::UniqueBuffer>();
     size_t imgDataSize = imgCh * imgWidth * imgHeight;
@@ -875,6 +842,37 @@ std::shared_ptr<vk::UniqueBuffer> getImageBuffer(vk::UniqueDevice& device, int i
     imgStagingBufferCreateInfo.sharingMode = vk::SharingMode::eExclusive;
 
     *result = device->createBufferUnique(imgStagingBufferCreateInfo);
+    return result;
+}
+
+std::shared_ptr<vk::UniqueDeviceMemory> getImageMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueImage& texImage, vk::UniqueBuffer& imgStagingBuf)
+{
+    std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
+
+    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
+    vk::MemoryRequirements imgStagingBufMemReq = device->getImageMemoryRequirements(texImage.get());
+
+    vk::MemoryAllocateInfo imgStagingBufMemAllocInfo;
+    imgStagingBufMemAllocInfo.allocationSize = imgStagingBufMemReq.size;
+
+    bool suitableMemoryTypeFound = false;
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
+    {
+        if (imgStagingBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible))
+        {
+            imgStagingBufMemAllocInfo.memoryTypeIndex = i;
+            suitableMemoryTypeFound = true;
+            break;
+        }
+    }
+    if (!suitableMemoryTypeFound)
+    {
+        LOGERR("Suitable memory type not found for image.");
+        exit(EXIT_FAILURE);
+    }
+
+    *result = device.get().allocateMemoryUnique(imgStagingBufMemAllocInfo);
+    device.get().bindBufferMemory(imgStagingBuf.get(), result->get(), 0);
     return result;
 }
 
@@ -979,11 +977,6 @@ void sendImageBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Qu
         // 見た通りなので詳細な説明は割愛
         imgCopyRegion.imageOffset = vk::Offset3D{0, 0, 0};
         imgCopyRegion.imageExtent = vk::Extent3D{uint32_t(imgWidth), uint32_t(imgHeight), 1};
-        LOG("Image Width: " << imgWidth);
-        LOG("Image Height: " << imgHeight);
-        
-        LOG("Extent3Dwidth " << uint32_t(imgWidth));
-        LOG("Extent3Dheight" << uint32_t(imgHeight));
         
         // bufferRowLength, bufferImageHeightは「バッファ上における」イメージの横・縦ピクセル数を示す
         // 例えば転送先の大きさは100x100だけど、バッファ上には200x200の画像データがあるというケースも可能
@@ -998,7 +991,6 @@ void sendImageBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Qu
         tmpCmdBufs[0]->copyBufferToImage(imgStagingBuf.get(), texImage.get(), vk::ImageLayout::eTransferDstOptimal, { imgCopyRegion });
     }
 
-    LOGERR("x2");
     // 3
     {
         vk::ImageMemoryBarrier barrior;
@@ -1020,21 +1012,16 @@ void sendImageBuffer(vk::UniqueDevice& device, uint32_t queueFamilyIndex, vk::Qu
         barrior.dstAccessMask = vk::AccessFlagBits::eShaderRead;
         tmpCmdBufs[0]->pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader, {}, {}, {}, {barrior});
     }
-    LOGERR("x3");
 
     tmpCmdBufs[0]->end();
 
-    LOGERR("x4");
     vk::CommandBuffer submitCmdBuf[1] = {tmpCmdBufs[0].get()};
     vk::SubmitInfo submitInfo;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = submitCmdBuf;
 
-    LOGERR("x5");
     graphicsQueue.submit({submitInfo});
-    LOGERR("x6");
     graphicsQueue.waitIdle();
-    LOGERR("x7");
 }
 
 std::shared_ptr<vk::UniqueSampler> getSampler(vk::UniqueDevice& device)

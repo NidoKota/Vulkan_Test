@@ -70,23 +70,13 @@ int main()
     writeStagingIndexBuffer(*device, *stagingIndexBufMem);
     sendIndexBuffer(*device, queueFamilyIndex, graphicsQueue, *stagingIndexBuf, *indexBuf);
 
-    LOG("1");
     int imgWidth, imgHeight, imgCh;
-    std::shared_ptr<vk::UniqueImage> texImage = getImage(*device, imgWidth, imgHeight, imgCh);
-    imgWidth = 256;
-    imgHeight = 256;
-    imgCh = 4;
-    LOG("2");
-    std::shared_ptr<vk::UniqueBuffer> imagebuffer = getImageBuffer(*device, imgWidth, imgHeight, imgCh);
-    LOG("3");
-    std::shared_ptr<vk::UniqueDeviceMemory> imgStagingBufMemory = getImageMemory(*device, physicalDevice, *imagebuffer);
-    LOG("4");
     void* imgData = getImageData(&imgWidth, &imgHeight, &imgCh);
-    LOG("5");
+    std::shared_ptr<vk::UniqueImage> texImage = getImage(*device, imgWidth, imgHeight, imgCh);
+    std::shared_ptr<vk::UniqueBuffer> imageStagingBuffer = getImageStagingBuffer(*device, imgWidth, imgHeight, imgCh);
+    std::shared_ptr<vk::UniqueDeviceMemory> imgStagingBufMemory = getImageMemory(*device, physicalDevice, *texImage, *imageStagingBuffer);
     writeImageBuffer(*device, *imgStagingBufMemory, imgData, imgWidth, imgHeight, imgCh);
-    LOG("6");
-    sendImageBuffer(*device, queueFamilyIndex, graphicsQueue, *imagebuffer, *texImage, imgWidth, imgHeight);
-    LOG("7");
+    sendImageBuffer(*device, queueFamilyIndex, graphicsQueue, *imageStagingBuffer, *texImage, imgWidth, imgHeight);
     std::shared_ptr<vk::UniqueSampler> texSampler = getSampler(*device);
     std::shared_ptr<vk::UniqueImageView> texImageView = getImageView(*device, *texImage);
     releaseImageData(imgData);

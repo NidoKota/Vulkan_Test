@@ -15,7 +15,8 @@ void* getImageData(int* imgWidth, int* imgHeight, int* imgCh)
     std::filesystem::path imagePath = currentPath / ".." / "assets" / "image.jpg";
     
     // Vulkanに画像データを渡すには圧縮されていない生データでなければない
-    stbi_uc* pImgData = stbi_load(imagePath.c_str(), imgWidth, imgHeight, imgCh, STBI_rgb_alpha);
+    stbi_uc* pImgData = stbi_load(imagePath.c_str(), imgWidth, imgHeight, nullptr, STBI_rgb_alpha);
+    *imgCh = 4;
 
     if (pImgData == nullptr) 
     {
