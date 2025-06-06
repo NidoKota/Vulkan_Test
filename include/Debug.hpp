@@ -123,7 +123,7 @@ namespace Vulkan_Test
         for (size_t i = 0; i < queueFamilyProperties.size(); i++)
         {
             LOG("----------------------------------------");
-            LOG("queue family index: " << i, 1);
+            LOG("queue family index: " << i);
             LOG("queue count: " << queueFamilyProperties[i].queueCount);
             LOG(to_string(queueFamilyProperties[i].queueFlags));
         }
