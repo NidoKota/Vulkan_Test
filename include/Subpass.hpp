@@ -15,13 +15,9 @@ std::shared_ptr<std::vector<vk::AttachmentReference>> getAttachmentReferences()
     // ここでは0を指定しているので0番のアタッチメントの意味
     std::shared_ptr<std::vector<vk::AttachmentReference>> result = std::make_shared<std::vector<vk::AttachmentReference>>();
     result->push_back(vk::AttachmentReference());
-    result->push_back(vk::AttachmentReference());
-
     (*result)[0].attachment = 0;
     (*result)[0].layout = vk::ImageLayout::eColorAttachmentOptimal;
-
-    (*result)[1].attachment = 1;
-    (*result)[1].layout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+    
     return result;
 }
 
