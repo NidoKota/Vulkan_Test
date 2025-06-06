@@ -69,6 +69,8 @@ namespace Vulkan_Test
         return result;
     }
 
+    int currentLogIndex = 0;
+
 #define SS2STR(x) \
 ([&]() -> std::string { std::stringstream ss; ss << std::boolalpha << x; return ss.str(); })()
 
@@ -78,21 +80,12 @@ namespace Vulkan_Test
 #define FILE_LINE_STR \
 __FILE__ << ":" << std::setw(3) << std::setfill('0') << __LINE__ << std::setfill(' ')
 
-#define GET_THIRD_ARG(_1, _2, NAME, ...) NAME
+#define SET_LOG_INDEX(x) \
+do { currentLogIndex = x; } while (false)
 
-#define LOG_CUSTOM_INDEX(x, index) \
-do { coutMultiThread(SS2STR(getTimeStamp() << " " << FILE_LINE_STR << " " << getIndexStr(index) << x << "\n")); } while (false)
+#define LOG(x) \
+do { coutMultiThread(SS2STR(getTimeStamp() << " " << FILE_LINE_STR << " " << getIndexStr(currentLogIndex) << x << "\n")); } while (false)
 
-#define LOG_0_INDEX(x) \
-LOG_CUSTOM_INDEX(x, 0)
-
-#define LOG(...) GET_THIRD_ARG(__VA_ARGS__, LOG_CUSTOM_INDEX, LOG_0_INDEX)(__VA_ARGS__)
-
-#define LOGERR_CUSTOM_INDEX(x, index) \
-do { coutMultiThread(SS2STR(getTimeStamp() << " " << FILE_LINE_STR << " " << getIndexStr(index) << x << "\n")); } while (false)
-
-#define LOGERR_0_INDEX(x) \
-LOGERR_CUSTOM_INDEX(x, 0)
-
-#define LOGERR(...) GET_THIRD_ARG(__VA_ARGS__, LOGERR_CUSTOM_INDEX, LOGERR_0_INDEX)(__VA_ARGS__)
+#define LOGERR(x) \
+do { coutMultiThread(SS2STR(getTimeStamp() << " " << FILE_LINE_STR << " " << getIndexStr(currentLogIndex) << x << "\n")); } while (false)
 }

@@ -49,14 +49,7 @@ int main()
     
     std::vector<vk::QueueFamilyProperties> queueProps = physicalDevice.getQueueFamilyProperties();
     debugQueueFamilyProperties(queueProps);
-        
-    vk::FormatProperties props = physicalDevice.getFormatProperties(vk::Format::eD32Sfloat);
-
-    // optimalTilingFeaturesにデプス/ステンシルアタッチメントとしての利用フラグがあるかチェック
-    if (!(props.optimalTilingFeatures & vk::FormatFeatureFlagBits::eDepthStencilAttachment)) {
-        throw std::runtime_error("vk::Format::eD32Sfloat is not supported for depth attachment!");
-    }
-
+    
     std::shared_ptr<vk::UniqueDevice> device = getDevice(physicalDevice, queueFamilyIndex);
     
     vk::Queue graphicsQueue = device->get().getQueue(queueFamilyIndex, 0);
@@ -81,10 +74,11 @@ int main()
     int imgWidth, imgHeight, imgCh;
     void* imgData = getImageData(&imgWidth, &imgHeight, &imgCh);
     std::shared_ptr<vk::UniqueImage> texImage = getImage(*device, imgWidth, imgHeight, imgCh);
-    std::shared_ptr<vk::UniqueBuffer> imageStagingBuffer = getImageStagingBuffer(*device, imgWidth, imgHeight, imgCh);
-    std::shared_ptr<vk::UniqueDeviceMemory> imgStagingBufMemory = getImageMemory(*device, physicalDevice, *texImage, *imageStagingBuffer);
+    std::shared_ptr<vk::UniqueDeviceMemory> imgBufMemory = getImageMemory(*device, physicalDevice, *texImage);
+    std::shared_ptr<vk::UniqueBuffer> imgStagingBuf = getStagingImageBuffer(*device, imgWidth, imgHeight, imgCh);
+    std::shared_ptr<vk::UniqueDeviceMemory> imgStagingBufMemory = getStagingImageMemory(*device, physicalDevice, *imgStagingBuf);
     writeImageBuffer(*device, *imgStagingBufMemory, imgData, imgWidth, imgHeight, imgCh);
-    sendImageBuffer(*device, queueFamilyIndex, graphicsQueue, *imageStagingBuffer, *texImage, imgWidth, imgHeight);
+    sendImageBuffer(*device, queueFamilyIndex, graphicsQueue, *imgStagingBuf, *texImage, imgWidth, imgHeight);
     std::shared_ptr<vk::UniqueSampler> texSampler = getSampler(*device);
     std::shared_ptr<vk::UniqueImageView> texImageView = getImageView(*device, *texImage);
     releaseImageData(imgData);

@@ -834,7 +834,38 @@ std::shared_ptr<vk::UniqueImage> getImage(vk::UniqueDevice& device, int imgWidth
     return result;
 }
 
-std::shared_ptr<vk::UniqueBuffer> getImageStagingBuffer(vk::UniqueDevice& device, int imgWidth, int imgHeight, int imgCh)
+std::shared_ptr<vk::UniqueDeviceMemory> getImageMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueImage& texImage)
+{
+    std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
+
+    vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
+    vk::MemoryRequirements imgBufMemReq = device->getImageMemoryRequirements(texImage.get());
+
+    vk::MemoryAllocateInfo imgBufMemAllocInfo;
+    imgBufMemAllocInfo.allocationSize = imgBufMemReq.size;
+
+    bool suitableMemoryTypeFound = false;
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
+    {
+        if (imgBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal))
+        {
+            imgBufMemAllocInfo.memoryTypeIndex = i;
+            suitableMemoryTypeFound = true;
+            break;
+        }
+    }
+    if (!suitableMemoryTypeFound)
+    {
+        LOGERR("Suitable memory type not found for image.");
+        exit(EXIT_FAILURE);
+    }
+
+    *result = device.get().allocateMemoryUnique(imgBufMemAllocInfo);
+    device.get().bindImageMemory(texImage.get(), result->get(), 0);
+    return result;
+}
+
+std::shared_ptr<vk::UniqueBuffer> getStagingImageBuffer(vk::UniqueDevice& device, int imgWidth, int imgHeight, int imgCh)
 {
     std::shared_ptr<vk::UniqueBuffer> result = std::make_shared<vk::UniqueBuffer>();
     size_t imgDataSize = imgCh * imgWidth * imgHeight;
@@ -848,18 +879,18 @@ std::shared_ptr<vk::UniqueBuffer> getImageStagingBuffer(vk::UniqueDevice& device
     return result;
 }
 
-std::shared_ptr<vk::UniqueDeviceMemory> getImageMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueImage& texImage, vk::UniqueBuffer& imgStagingBuf)
+std::shared_ptr<vk::UniqueDeviceMemory> getStagingImageMemory(vk::UniqueDevice& device, vk::PhysicalDevice& physicalDevice, vk::UniqueBuffer& imgStagingBuf)
 {
     std::shared_ptr<vk::UniqueDeviceMemory> result = std::make_shared<vk::UniqueDeviceMemory>();
 
     vk::PhysicalDeviceMemoryProperties memProps = physicalDevice.getMemoryProperties();
-    vk::MemoryRequirements imgStagingBufMemReq = device->getImageMemoryRequirements(texImage.get());
+    vk::MemoryRequirements imgStagingBufMemReq = device->getBufferMemoryRequirements(imgStagingBuf.get());
 
     vk::MemoryAllocateInfo imgStagingBufMemAllocInfo;
     imgStagingBufMemAllocInfo.allocationSize = imgStagingBufMemReq.size;
 
     bool suitableMemoryTypeFound = false;
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) 
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++)
     {
         if (imgStagingBufMemReq.memoryTypeBits & (1 << i) && (memProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible))
         {
