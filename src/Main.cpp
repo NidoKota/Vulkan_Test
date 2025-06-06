@@ -49,7 +49,14 @@ int main()
     
     std::vector<vk::QueueFamilyProperties> queueProps = physicalDevice.getQueueFamilyProperties();
     debugQueueFamilyProperties(queueProps);
-    
+        
+    vk::FormatProperties props = physicalDevice.getFormatProperties(vk::Format::eD32Sfloat);
+
+    // optimalTilingFeaturesにデプス/ステンシルアタッチメントとしての利用フラグがあるかチェック
+    if (!(props.optimalTilingFeatures & vk::FormatFeatureFlagBits::eDepthStencilAttachment)) {
+        throw std::runtime_error("vk::Format::eD32Sfloat is not supported for depth attachment!");
+    }
+
     std::shared_ptr<vk::UniqueDevice> device = getDevice(physicalDevice, queueFamilyIndex);
     
     vk::Queue graphicsQueue = device->get().getQueue(queueFamilyIndex, 0);
