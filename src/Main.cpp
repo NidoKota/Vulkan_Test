@@ -18,6 +18,7 @@
 #include "../include/Instance.hpp"
 #include "../include/ShaderData.hpp"
 #include "../include/Texture.hpp"
+#include "../include/Depth.hpp"
 
 using namespace Vulkan_Test;
 
@@ -45,7 +46,7 @@ int main()
     std::tie(physicalDevice, queueFamilyIndex) = *physicalDeviceAndQueueFamilyIndex;
     debugPhysicalDevice(physicalDevice, queueFamilyIndex);
     debugPhysicalMemory(physicalDevice);
-
+    
     std::vector<vk::QueueFamilyProperties> queueProps = physicalDevice.getQueueFamilyProperties();
     debugQueueFamilyProperties(queueProps);
     
@@ -53,7 +54,7 @@ int main()
     
     vk::Queue graphicsQueue = device->get().getQueue(queueFamilyIndex, 0);
 
-    std::shared_ptr<std::vector<vk::VertexInputBindingDescription>> vertexBindingDescriptio = getVertexBindingDescription();
+    std::shared_ptr<std::vector<vk::VertexInputBindingDescription>> vertexBindingDescription = getVertexBindingDescription();
     std::shared_ptr<std::vector<vk::VertexInputAttributeDescription>> vertexInputDescription = getVertexInputDescription();
 
     std::shared_ptr<vk::UniqueBuffer> vertexBuf = getVertexBuffer(*device);
@@ -99,14 +100,18 @@ int main()
     vk::PresentModeKHR& surfacePresentMode = (*surfacePresentModes)[0];
 
     std::shared_ptr<std::vector<vk::AttachmentReference>> subpass0_attachmentRefs = getAttachmentReferences();
-    std::shared_ptr<std::vector<vk::SubpassDescription>> subpasses = getSubpassDescription(*subpass0_attachmentRefs);
+    std::shared_ptr<vk::AttachmentReference> subpass0_depthStencilAttachmentRef = getDepthStencilAttachmentReference();
+    std::shared_ptr<std::vector<vk::SubpassDescription>> subpasses = getSubpassDescription(*subpass0_attachmentRefs, *subpass0_depthStencilAttachmentRef);
 
     std::shared_ptr<vk::UniqueRenderPass> renderPass = getRenderPass(*device, surfaceFormat, *subpasses);
-    std::shared_ptr<vk::UniquePipeline> pipeline = getPipeline(*device, *renderPass, *surfaceCapabilities, *vertexBindingDescriptio, *vertexInputDescription, *descpriptorPipelineLayout);
+    std::shared_ptr<vk::UniquePipeline> pipeline = getPipeline(*device, *renderPass, *surfaceCapabilities, *vertexBindingDescription, *vertexInputDescription, *descpriptorPipelineLayout);
 
     std::shared_ptr<vk::UniqueSwapchainKHR> swapchain;
     std::shared_ptr<std::vector<vk::Image>> swapchainImages;
     std::shared_ptr<std::vector<vk::UniqueImageView>> swapchainImageViews;
+    std::shared_ptr<vk::UniqueImage> depthImage;
+    std::shared_ptr<vk::UniqueDeviceMemory> depthImageMemory;
+    std::shared_ptr<vk::UniqueImageView> depthImageView;
     std::shared_ptr<std::vector<vk::UniqueFramebuffer>> swapchainFramebufs;
     
     auto recreateSwapchain = [&]()
@@ -114,6 +119,18 @@ int main()
         if (swapchainFramebufs)
         {
             swapchainFramebufs->clear();
+        }
+        if (depthImageView)
+        {
+            depthImageView->reset();
+        }
+        if (depthImageMemory)
+        {
+            depthImageMemory->reset();
+        }
+        if (depthImage)
+        {
+            depthImage->reset();
         }
         if (swapchainImageViews)
         {
@@ -131,7 +148,10 @@ int main()
         swapchain = getSwapchain(*device, physicalDevice, *surface, *surfaceCapabilities, surfaceFormat, surfacePresentMode);
         swapchainImages = getSwapchainImages(*device, *swapchain);
         swapchainImageViews = getSwapchainImageViews(*device, *swapchain, *swapchainImages, surfaceFormat);
-        swapchainFramebufs = getFramebuffers(*device, *renderPass, *swapchainImageViews, *surfaceCapabilities);
+        depthImage = getDepthImage(*device, physicalDevice, *surfaceCapabilities);
+        depthImageMemory = getDepthImageMemory(*device, physicalDevice, *depthImage);
+        depthImageView = getDepthImageView(*device, *renderPass, *depthImage);
+        swapchainFramebufs = getFramebuffers(*device, *renderPass, *swapchainImageViews, *surfaceCapabilities, *depthImageView);
     };
 
     recreateSwapchain();
@@ -181,8 +201,7 @@ int main()
 
         device->get().resetFences({ imgRenderedFence.get() });
         
-        writeUniformBuffer(pUniformBufMem, *device, *uniformBufMem, deltaTime);
-        writePushConstant(screenWidth, screenHeight, deltaTime);
+        writeUniformBuffer(pUniformBufMem, *device, *uniformBufMem, screenWidth, screenHeight, deltaTime);
         
         uint32_t imgIndex = acquireImgResult.value;
     
@@ -191,17 +210,22 @@ int main()
         vk::CommandBufferBeginInfo cmdBeginInfo;
         (*cmdBufs)[0]->begin(cmdBeginInfo);
         
-        vk::ClearValue clearVal[1];
+        vk::ClearValue clearVal[2];
         clearVal[0].color.float32[0] = 0.0f;
         clearVal[0].color.float32[1] = 0.0f;
         clearVal[0].color.float32[2] = 0.0f;
         clearVal[0].color.float32[3] = 1.0f;
 
+        // 深度バッファの値は最初は1.0fにクリアされている必要がある
+        // 手前かどうかを判定するためのものなので、初期値は何よりも遠くになっていなければならない
+        // クリッピングにより1.0より遠くは描画されないので、1.0より大きい値でクリアする必要はない
+        clearVal[1].depthStencil.depth = 1.0f;
+
         vk::RenderPassBeginInfo renderpassBeginInfo;
         renderpassBeginInfo.renderPass = renderPass->get();
         renderpassBeginInfo.framebuffer = (*swapchainFramebufs)[imgIndex].get();
         renderpassBeginInfo.renderArea = vk::Rect2D({ 0,0 }, surfaceCapabilities->currentExtent);
-        renderpassBeginInfo.clearValueCount = 1;
+        renderpassBeginInfo.clearValueCount = 2;
         renderpassBeginInfo.pClearValues = clearVal;
 
         (*cmdBufs)[0]->beginRenderPass(renderpassBeginInfo, vk::SubpassContents::eInline);
@@ -210,7 +234,13 @@ int main()
         (*cmdBufs)[0]->bindVertexBuffers(0, { vertexBuf->get() }, { 0 }); 
         (*cmdBufs)[0]->bindIndexBuffer(indexBuf->get(), 0, vk::IndexType::eUint16);
         (*cmdBufs)[0]->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, descpriptorPipelineLayout->get(), 0, { (*descSets)[0].get() }, {});
-        (*cmdBufs)[0]->pushConstants(descpriptorPipelineLayout->get(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(CameraData), &cameraData);
+
+        writePushConstant(0);
+        (*cmdBufs)[0]->pushConstants(descpriptorPipelineLayout->get(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(ObjectData), &objectData);
+        (*cmdBufs)[0]->drawIndexed(indices.size(), 1, 0, 0, 0);
+        
+        writePushConstant(1);
+        (*cmdBufs)[0]->pushConstants(descpriptorPipelineLayout->get(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(ObjectData), &objectData);
         (*cmdBufs)[0]->drawIndexed(indices.size(), 1, 0, 0, 0);
     
         (*cmdBufs)[0]->endRenderPass();

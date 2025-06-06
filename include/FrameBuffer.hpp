@@ -8,7 +8,7 @@
 
 using namespace Vulkan_Test;
 
-std::shared_ptr<std::vector<vk::UniqueFramebuffer>> getFramebuffers(vk::UniqueDevice& device, vk::UniqueRenderPass& renderPass, std::vector<vk::UniqueImageView>& swapchainImageViews, vk::SurfaceCapabilitiesKHR& surfaceCapabilities)
+std::shared_ptr<std::vector<vk::UniqueFramebuffer>> getFramebuffers(vk::UniqueDevice& device, vk::UniqueRenderPass& renderPass, std::vector<vk::UniqueImageView>& swapchainImageViews, vk::SurfaceCapabilitiesKHR& surfaceCapabilities, vk::UniqueImageView& depthImageView)
 {
     // レンダーパスは処理(サブパス)とデータ(アタッチメント)のつながりと関係性を記述するが、具体的な処理内容やどのデータを扱うかについては関与しない
     // 具体的な処理内容はコマンドバッファに積むコマンドやパイプラインによって決まるが、具体的なデータの方を決めるためのものがフレームバッファである
@@ -23,8 +23,9 @@ std::shared_ptr<std::vector<vk::UniqueFramebuffer>> getFramebuffers(vk::UniqueDe
     {
         // イメージビューの情報を初期化用構造体に入れている
         // これで0番のアタッチメントがどのイメージビューに対応しているのかを示すことができる
-        vk::ImageView frameBufAttachments[1];
+        vk::ImageView frameBufAttachments[2];
         frameBufAttachments[0] = swapchainImageViews[i].get();
+        frameBufAttachments[1] = depthImageView.get();  // 追加
 
         // フレームバッファを介して「0番のアタッチメントはこのイメージビュー、1番のアタッチメントは…」という結び付けを行うことで初めてレンダーパスが使える
         vk::FramebufferCreateInfo framebufferCreateInfo;

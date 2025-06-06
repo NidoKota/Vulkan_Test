@@ -15,13 +15,25 @@ std::shared_ptr<std::vector<vk::AttachmentReference>> getAttachmentReferences()
     // ここでは0を指定しているので0番のアタッチメントの意味
     std::shared_ptr<std::vector<vk::AttachmentReference>> result = std::make_shared<std::vector<vk::AttachmentReference>>();
     result->push_back(vk::AttachmentReference());
+    result->push_back(vk::AttachmentReference());
 
     (*result)[0].attachment = 0;
     (*result)[0].layout = vk::ImageLayout::eColorAttachmentOptimal;
+
+    (*result)[1].attachment = 1;
+    (*result)[1].layout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
     return result;
 }
 
-std::shared_ptr<std::vector<vk::SubpassDescription>> getSubpassDescription(std::vector<vk::AttachmentReference>& subpass0_attachmentReferences)
+std::shared_ptr<vk::AttachmentReference> getDepthStencilAttachmentReference()
+{
+    std::shared_ptr<vk::AttachmentReference> result = std::make_shared<vk::AttachmentReference>();
+    result->attachment = 1;
+    result->layout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+    return result;
+}
+
+std::shared_ptr<std::vector<vk::SubpassDescription>> getSubpassDescription(std::vector<vk::AttachmentReference>& subpass0_attachmentReferences, vk::AttachmentReference& subpass0_depthAttachmentReference)
 {
     std::shared_ptr<std::vector<vk::SubpassDescription>> result = std::make_shared<std::vector<vk::SubpassDescription>>();
     result->push_back(vk::SubpassDescription());
@@ -29,5 +41,6 @@ std::shared_ptr<std::vector<vk::SubpassDescription>> getSubpassDescription(std::
     (*result)[0].pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
     (*result)[0].colorAttachmentCount = subpass0_attachmentReferences.size();
     (*result)[0].pColorAttachments = subpass0_attachmentReferences.data();
+    (*result)[0].pDepthStencilAttachment = &subpass0_depthAttachmentReference;
     return result;
 }

@@ -27,11 +27,11 @@ struct Vertex {
 };
 
 struct SceneData {
-    Vec2 rectCenter;
+    Mat4x4 mvpMatrix[2];
 };
 
-struct CameraData {
-    Mat4x4 mvpMatrix;
+struct ObjectData {
+    int id;
 };
 
 Mat4x4 operator*(const Mat4x4 &a, const Mat4x4 &b) {
@@ -62,7 +62,74 @@ std::vector<uint16_t> indices = {
 };
 
 SceneData sceneData;
-CameraData cameraData;
+ObjectData objectData;
+
+Mat4x4 scaleMatrix(float scale) 
+{
+    return Mat4x4{{
+        {scale, 0, 0, 0},
+        {0, scale, 0, 0},
+        {0, 0, scale, 0},
+        {0, 0, 0, 1},
+    }};
+}
+
+Mat4x4 rotationMatrix(Vec3 n, float theta) 
+{
+    float c = cos(theta);
+    float s = sin(theta);
+    float nc = 1 - c;
+
+    return Mat4x4{{
+        {n.x * n.x * nc + c,       n.x * n.y * nc + n.z * s, n.x * n.z * nc - n.y * s, 0},
+        {n.y * n.x * nc - n.z * s, n.y * n.y * nc + c,       n.y * n.z * nc + n.x * s, 0},
+        {n.z * n.x * nc + n.y * s, n.z * n.y * nc - n.x * s, n.z * n.z * nc + c,       0},
+        {0, 0, 0, 1},
+    }};
+}
+
+Mat4x4 translationMatrix(Vec3 v) 
+{
+    return Mat4x4{{
+        {1, 0, 0, 0},
+        {0, 1, 0, 0},
+        {0, 0, 1, 0},
+        {v.x, v.y, v.z, 1},
+    }};
+}
+
+Mat4x4 viewMatrix(Vec3 cameraPos, Vec3 dir, Vec3 up) 
+{
+    const auto cameraShift = 
+        Mat4x4{{
+            {1, 0, 0, 0},
+            {0, 1, 0, 0},
+            {0, 0, 1, 0},
+            {-cameraPos.x, -cameraPos.y, -cameraPos.z, 1},
+        }};
+    const auto cameraRotation = 
+        Mat4x4{{
+            {up.z * dir.y - up.y * dir.z, -up.x, dir.x, 0},
+            {up.x * dir.z - up.z * dir.x, -up.y, dir.y, 0},
+            {up.y * dir.x - up.x * dir.y, -up.z, dir.z, 0},
+            {0, 0, 0, 1},
+        }};
+
+    return cameraRotation * cameraShift;
+}
+
+Mat4x4 projectionMatrix(float angle_y, float ratio, float near, float far) 
+{
+    float ky = tan(angle_y);
+    float kx = ky * ratio;
+
+    return Mat4x4{{
+        {kx, 0, 0, 0},
+        {0, ky, 0, 0},
+        {0, 0, far/(far-near), 1},
+        {0, 0, -near*far/(far-near), 0}
+    }};
+}
 
 std::shared_ptr<vk::UniqueBuffer> getVertexBuffer(vk::UniqueDevice& device)
 {
@@ -530,12 +597,24 @@ void* mapUniformBuffer(vk::UniqueDevice& device, vk::UniqueDeviceMemory& uniform
     return device.get().mapMemory(uniformBufMem.get(), 0, sizeof(SceneData));
 }
 
-void writeUniformBuffer(void* pUniformBufMem, vk::UniqueDevice& device, vk::UniqueDeviceMemory& uniformBufMem, int deltaTime)
+void writeUniformBuffer(void* pUniformBufMem, vk::UniqueDevice& device, vk::UniqueDeviceMemory& uniformBufMem, uint32_t screenWidth, uint32_t screenHeight, int deltaTime)
 {
     static float time = 0;
 
-    sceneData.rectCenter = Vec2{ 0.3f * std::cos(time), 0.3f * std::sin(time) };
     time += deltaTime / 1000.0f;
+
+    float rotation = (time / 10) * 2 * 3.14f;
+
+    Mat4x4 model1 = translationMatrix({cos(rotation), sin(rotation), 0.0f}) * rotationMatrix({0.0f, 0.0f, 1.0f}, rotation) * scaleMatrix(1.0f);
+    Mat4x4 model2 = translationMatrix({-cos(rotation), -sin(rotation), 0.0f}) * rotationMatrix({0.0f, 0.0f, 1.0f}, rotation) * scaleMatrix(1.0f);
+
+    Mat4x4 view = viewMatrix({0.0f, 2.0f, 1.5f}, {0.0f, -0.707f, -0.707f}, {0.0f, -0.707f, +0.707f});
+    Mat4x4 proj = projectionMatrix(3.14f / 3, float(screenHeight) / float(screenWidth), 0.1f, 100.0f);
+
+    sceneData.mvpMatrix[0] = proj * view * model1;
+    sceneData.mvpMatrix[1] = proj * view * model2;
+
+    // sceneData.rectCenter = Vec2{ 0.3f * std::cos(time), 0.3f * std::sin(time) };
 
     std::memcpy(pUniformBufMem, &sceneData, sizeof(SceneData));
 
@@ -581,7 +660,7 @@ std::shared_ptr<std::vector<vk::UniqueDescriptorSetLayout>> getDiscriptorSetLayo
     descSetLayoutBinding[1].stageFlags = vk::ShaderStageFlagBits::eFragment;
     
     vk::DescriptorSetLayoutCreateInfo descSetLayoutCreateInfo{};
-    descSetLayoutCreateInfo.bindingCount = std::size(descSetLayoutBinding);;
+    descSetLayoutCreateInfo.bindingCount = std::size(descSetLayoutBinding);
     descSetLayoutCreateInfo.pBindings = descSetLayoutBinding;
     
     // デスクリプタセットレイアウトを作成したあとはそれをパイプラインレイアウトに設定する必要がある
@@ -709,73 +788,6 @@ void writeDescriptorSets(vk::UniqueDevice& device, std::vector<vk::UniqueDescrip
     device->updateDescriptorSets({ writeTexDescSet }, {});
 }
 
-Mat4x4 scaleMatrix(float scale) 
-{
-    return Mat4x4{{
-        {scale, 0, 0, 0},
-        {0, scale, 0, 0},
-        {0, 0, scale, 0},
-        {0, 0, 0, 1},
-    }};
-}
-
-Mat4x4 rotationMatrix(Vec3 n, float theta) 
-{
-    float c = cos(theta);
-    float s = sin(theta);
-    float nc = 1 - c;
-
-    return Mat4x4{{
-        {n.x * n.x * nc + c,       n.x * n.y * nc + n.z * s, n.x * n.z * nc - n.y * s, 0},
-        {n.y * n.x * nc - n.z * s, n.y * n.y * nc + c,       n.y * n.z * nc + n.x * s, 0},
-        {n.z * n.x * nc + n.y * s, n.z * n.y * nc - n.x * s, n.z * n.z * nc + c,       0},
-        {0, 0, 0, 1},
-    }};
-}
-
-Mat4x4 translationMatrix(Vec3 v) 
-{
-    return Mat4x4{{
-        {1, 0, 0, 0},
-        {0, 1, 0, 0},
-        {0, 0, 1, 0},
-        {v.x, v.y, v.z, 1},
-    }};
-}
-
-Mat4x4 viewMatrix(Vec3 cameraPos, Vec3 dir, Vec3 up) 
-{
-    const auto cameraShift = 
-        Mat4x4{{
-            {1, 0, 0, 0},
-            {0, 1, 0, 0},
-            {0, 0, 1, 0},
-            {-cameraPos.x, -cameraPos.y, -cameraPos.z, 1},
-        }};
-    const auto cameraRotation = 
-        Mat4x4{{
-            {up.z * dir.y - up.y * dir.z, -up.x, dir.x, 0},
-            {up.x * dir.z - up.z * dir.x, -up.y, dir.y, 0},
-            {up.y * dir.x - up.x * dir.y, -up.z, dir.z, 0},
-            {0, 0, 0, 1},
-        }};
-
-    return cameraRotation * cameraShift;
-}
-
-Mat4x4 projectionMatrix(float angle_y, float ratio, float near, float far) 
-{
-    float ky = tan(angle_y);
-    float kx = ky * ratio;
-
-    return Mat4x4{{
-        {kx, 0, 0, 0},
-        {0, ky, 0, 0},
-        {0, 0, far/(far-near), 1},
-        {0, 0, -near*far/(far-near), 0}
-    }};
-}
-
 std::shared_ptr<std::vector<vk::PushConstantRange>> getPushConstantRanges()
 {
     // 小さい数値データはプッシュ定数、大きなバッファやテクスチャ画像などのデータはデスクリプタを使う
@@ -784,25 +796,16 @@ std::shared_ptr<std::vector<vk::PushConstantRange>> getPushConstantRanges()
 
     vk::PushConstantRange pushConstantRange;
     pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(CameraData);
+    pushConstantRange.size = sizeof(ObjectData);
     pushConstantRange.stageFlags = vk::ShaderStageFlagBits::eVertex;
 
     (*result).push_back(pushConstantRange);
     return result;
 }
 
-void writePushConstant(uint32_t screenWidth, uint32_t screenHeight, int deltaTime)
+void writePushConstant(int id)
 {
-    static float time = 0;
-    time += deltaTime / 1000.0f;
-
-    float rotation = (time / 10) * 2 * 3.14f;
-
-    Mat4x4 model = translationMatrix({0.0f, 0.0f, 0.0f}) * rotationMatrix({0.0f, 0.0f, 1.0f}, rotation) * scaleMatrix(1.0f);
-    Mat4x4 view = viewMatrix({0.0f, 2.0f, 2.0f}, {0.0f, -0.707f, -0.707f}, {0.0f, -0.707f, +0.707f});
-    Mat4x4 proj = projectionMatrix(3.14f / 3, float(screenHeight) / float(screenWidth), 0.1f, 100.0f);
-    
-    cameraData.mvpMatrix = proj * view * model;
+    objectData.id = id;
 }
 
 

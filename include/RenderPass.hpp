@@ -13,14 +13,16 @@ using namespace Vulkan_Test;
 // どのように利用され、どのような特性を持つかを vk::AttachmentDescription を用いて明示的に指定する必要がある。
 std::shared_ptr<std::vector<vk::AttachmentDescription>> getAttachmentDescriptions(vk::SurfaceFormatKHR &surfaceFormat)
 {
-    std::shared_ptr<std::vector<vk::AttachmentDescription>> result = std::make_shared<std::vector<vk::AttachmentDescription>>(1);
+    std::shared_ptr<std::vector<vk::AttachmentDescription>> result = std::make_shared<std::vector<vk::AttachmentDescription>>();
+    (*result).push_back(vk::AttachmentDescription());
+    (*result).push_back(vk::AttachmentDescription());
 
     // flags: アタッチメントに関する追加のフラグを指定する。例えば、vk::AttachmentDescriptionFlagBits::eMayAlias は、異なるレンダーパスにおいて同じメモリ領域がエイリアスされる可能性があることを示す。 
     // (*result)[0].flags = vk::AttachmentDescriptionFlagBits::eMayAlias;
 
     // formatにはイメージのフォーマット情報を指定する必要がある
     // format: アタッチメントが使用するピクセルフォーマットを指定する。
-    // これは、カラーバッファであれば vk::Format::eR8G8B8A8Unorm のようなカラーフォーマット、デプス/ステンシルバッファであれば vk::Format::eD32SfloatS8Uint のようなデプス/ステンシルフォーマットとなる。
+    // これは、カラーバッファであれば vk::Format::eR8G8B8A8Unorm のようなカラーフォーマット、デプス/ステンシルバッファであれば vk::Format::eD32Sfloat のようなデプス/ステンシルフォーマットとなる。
     (*result)[0].format = surfaceFormat.format;
 
     // samples: アタッチメントが使用するサンプリング数を指定する。
@@ -58,6 +60,23 @@ std::shared_ptr<std::vector<vk::AttachmentDescription>> getAttachmentDescription
     // レンダーパスの後にどのようにアタッチメントを使用するかによって適切なレイアウトを選択する必要がある。
     // 例えば、描画結果をスワップチェーンに表示する場合は vk::ImageLayout::ePresentSrcKHR、次のレンダーパスで入力として使用する場合は vk::ImageLayout::eShaderReadOnlyOptimal などが考えられる。
     (*result)[0].finalLayout = vk::ImageLayout::ePresentSrcKHR;
+
+    // レンダーパスは描画処理の大まかな流れを表すオブジェクト
+    // 今までは画像一枚を出力するだけだったが、深度バッファが関わる場合は少し設定を変える必要がある
+    // 具体的には、深度バッファもアタッチメントの一種という扱いなのでその設定をする
+    (*result)[1].format = vk::Format::eD32Sfloat;
+    (*result)[1].samples = vk::SampleCountFlagBits::e1;
+    (*result)[1].loadOp = vk::AttachmentLoadOp::eClear;
+    // storeOpはeDontCareにする
+    // 深度バッファの最終的な値はどうでもいいため
+    (*result)[1].storeOp = vk::AttachmentStoreOp::eDontCare;
+    (*result)[1].stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
+    (*result)[1].stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+    (*result)[1].initialLayout = vk::ImageLayout::eUndefined;
+    // finalLayoutはeDepthStencilAttachmentOptimalを指定
+    // 深度バッファとして使うイメージはこのレイアウトになっていると良いとされている
+    (*result)[1].finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+
     return result;
 }
 

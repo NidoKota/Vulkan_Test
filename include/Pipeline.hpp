@@ -41,6 +41,18 @@ std::shared_ptr<vk::UniquePipeline> getPipeline(
     vertexInputInfo.pVertexBindingDescriptions = vertexBindingDescription.data();
     vertexInputInfo.vertexAttributeDescriptionCount = vertexInputDescription.size();
     vertexInputInfo.pVertexAttributeDescriptions = vertexInputDescription.data();
+
+    // 深度バッファを有効化するための設定を入れる構造体
+    vk::PipelineDepthStencilStateCreateInfo depthstencil;
+    // depthTestEnableをVK_TRUEにすると、深度バッファの値とZ値の比較による描画スキップ(デプステスト)が有効化される
+    depthstencil.depthTestEnable = true;
+    // depthWriteEnableをVK_TRUEにすると、ポリゴンを描画した際にそのZ値が深度バッファに書き込まれる
+    depthstencil.depthWriteEnable = true;
+    // depthCompareOpは、デプステストの際の比較方法を指定
+    // ここではeLessを指定しているが、例えばeGreaterなどを指定すると逆の判定になる
+    depthstencil.depthCompareOp = vk::CompareOp::eLess;
+    depthstencil.depthBoundsTestEnable = false;
+    depthstencil.stencilTestEnable = false;
     
     // パイプラインとは、3DCGの基本的な描画処理をひとつながりにまとめたもの
     // パイプラインは「点の集まりで出来た図形を色のついたピクセルの集合に変換するもの」
@@ -146,6 +158,7 @@ std::shared_ptr<vk::UniquePipeline> getPipeline(
     pipelineCreateInfo.pRasterizationState = &rasterizer;
     pipelineCreateInfo.pMultisampleState = &multisample;
     pipelineCreateInfo.pColorBlendState = &blend;
+    pipelineCreateInfo.pDepthStencilState = &depthstencil;
     pipelineCreateInfo.layout = pipelineLayout.get();
     pipelineCreateInfo.renderPass = renderpass.get();
     pipelineCreateInfo.subpass = 0;
