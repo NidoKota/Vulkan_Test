@@ -35,24 +35,33 @@ vk::DispatchLoaderDynamic dldi;
 
 void initVulkan(android_app* pApp) {
     if (!pApp->window) {
-        LOG("ウィンドウがありません！ Vulkanを初期化できません。");
+        LOG("ウィンドウがないのでVulkanを初期化できません");
         return;
     }
 
     std::shared_ptr<vk::ApplicationInfo> appInfo = getAppInfo();
     debugApplicationInfo(*appInfo);
+    LOG("ApplicationInfoの作成");
 
     std::shared_ptr<vk::UniqueInstance> instance = getInstance(*appInfo);
     dldi.init((*instance).get(), vkGetInstanceProcAddr);
-
-
-    vk::AndroidSurfaceCreateInfoKHR surfaceCreateInfo({}, pApp->window);
+    std::shared_ptr<vk::UniqueSurfaceKHR> surface = getSurface(*instance, pApp->window);
+    LOG("Instanceの作成");
 
     std::shared_ptr<std::vector<vk::PhysicalDevice>> physicalDevices = getPhysicalDevices(*instance);
     debugPhysicalDevices(*physicalDevices);
-    LOG("Vulkanサーフェスを作成しました。");
 
-    // TODO: この後に物理デバイス選択、論理デバイス作成、スワップチェーン作成と続く...
+    std::shared_ptr<std::pair<vk::PhysicalDevice, uint32_t>> physicalDeviceAndQueueFamilyIndex = selectPhysicalDeviceAndQueueFamilyIndex(*physicalDevices, *surface);
+    vk::PhysicalDevice physicalDevice;
+    uint32_t queueFamilyIndex;
+    std::tie(physicalDevice, queueFamilyIndex) = *physicalDeviceAndQueueFamilyIndex;
+    debugPhysicalDevice(physicalDevice, queueFamilyIndex);
+    debugPhysicalMemory(physicalDevice);
+
+    std::vector<vk::QueueFamilyProperties> queueProps = physicalDevice.getQueueFamilyProperties();
+    debugQueueFamilyProperties(queueProps);
+
+    LOG("Vulkanのセットアップ完了");
 }
 
 void terminateVulkan() {
@@ -156,7 +165,7 @@ extern "C"
 {
 void android_main(struct android_app *pApp)
 {
-    LOG("起動");
+    LOG("android_main 起動");
 
     pApp->onAppCmd = handle_cmd;
     android_app_set_motion_event_filter(pApp, motion_event_filter_func);

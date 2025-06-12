@@ -20,7 +20,13 @@ using namespace Vulkan_Test;
 // 描画結果を実際に画面に表示するためには、vk::SurfaceKHR と互換性のあるスワップチェーン (vk::SwapchainKHR) を作成する必要がある
 // スワップチェーンは、描画に使用する複数のイメージ (通常はダブルバッファリングやトリプルバッファリング) を管理し、描画が終わったイメージをサーフェスに提示 (present) する役割を担う
 #if defined(__ANDROID__)
-
+std::shared_ptr<vk::UniqueSurfaceKHR> getSurface(vk::UniqueInstance& instance, ANativeWindow* window)
+{
+    std::shared_ptr<vk::UniqueSurfaceKHR> result = std::make_shared<vk::UniqueSurfaceKHR>();
+    vk::AndroidSurfaceCreateInfoKHR surfaceCreateInfo(vk::AndroidSurfaceCreateFlagsKHR(), window);
+    *result = instance->createAndroidSurfaceKHRUnique(surfaceCreateInfo);
+    return result;
+}
 #else
 std::shared_ptr<vk::UniqueSurfaceKHR> getSurface(vk::UniqueInstance& instance, GLFWwindow& window)
 {
