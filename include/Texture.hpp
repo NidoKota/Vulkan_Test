@@ -22,7 +22,7 @@ void* getImageData(int* imgWidth, int* imgHeight, int* imgCh)
 
     if (pImgData == nullptr) 
     {
-       std::cerr << "Failed to load image file." << std::endl;
+       LOG("Failed to load image file." << imagePathStr);
        exit(EXIT_FAILURE);
     }
 

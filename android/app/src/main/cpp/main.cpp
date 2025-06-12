@@ -29,10 +29,6 @@ extern "C"
 #include "Texture.hpp"
 #include "Depth.hpp"
 
-vk::Instance instance = nullptr;
-vk::SurfaceKHR surface = nullptr;
-vk::DispatchLoaderDynamic dldi;
-
 void initVulkan(android_app* pApp) {
     if (!pApp->window) {
         LOG("ウィンドウがないのでVulkanを初期化できません");
@@ -41,12 +37,9 @@ void initVulkan(android_app* pApp) {
 
     std::shared_ptr<vk::ApplicationInfo> appInfo = getAppInfo();
     debugApplicationInfo(*appInfo);
-    LOG("ApplicationInfoの作成");
 
     std::shared_ptr<vk::UniqueInstance> instance = getInstance(*appInfo);
-    dldi.init((*instance).get(), vkGetInstanceProcAddr);
     std::shared_ptr<vk::UniqueSurfaceKHR> surface = getSurface(*instance, pApp->window);
-    LOG("Instanceの作成");
 
     std::shared_ptr<std::vector<vk::PhysicalDevice>> physicalDevices = getPhysicalDevices(*instance);
     debugPhysicalDevices(*physicalDevices);
@@ -61,21 +54,133 @@ void initVulkan(android_app* pApp) {
     std::vector<vk::QueueFamilyProperties> queueProps = physicalDevice.getQueueFamilyProperties();
     debugQueueFamilyProperties(queueProps);
 
-    LOG("Vulkanのセットアップ完了");
+    std::shared_ptr<vk::UniqueDevice> device = getDevice(physicalDevice, queueFamilyIndex);
+
+    vk::Queue graphicsQueue = device->get().getQueue(queueFamilyIndex, 0);
+
+    std::shared_ptr<std::vector<vk::VertexInputBindingDescription>> vertexBindingDescription = getVertexBindingDescription();
+    std::shared_ptr<std::vector<vk::VertexInputAttributeDescription>> vertexInputDescription = getVertexInputDescription();
+
+    std::shared_ptr<vk::UniqueBuffer> vertexBuf = getVertexBuffer(*device);
+    std::shared_ptr<vk::UniqueDeviceMemory> vertexBufMem = getVertexBufferMemory(*device, physicalDevice, *vertexBuf);
+    std::shared_ptr<vk::UniqueBuffer> stagingVertexBuf = getStagingVertexBuffer(*device, physicalDevice);
+    std::shared_ptr<vk::UniqueDeviceMemory> stagingVertexBufMem = getStagingVertexBufferMemory(*device, physicalDevice, *stagingVertexBuf);
+    writeStagingVertexBuffer(*device, *stagingVertexBufMem);
+    sendVertexBuffer(*device, queueFamilyIndex, graphicsQueue, *stagingVertexBuf, *vertexBuf);
+
+    std::shared_ptr<vk::UniqueBuffer> indexBuf = getIndexBuffer(*device);
+    std::shared_ptr<vk::UniqueDeviceMemory> indexBufMem = getIndexBufferMemory(*device, physicalDevice, *indexBuf);
+    std::shared_ptr<vk::UniqueBuffer> stagingIndexBuf = getStagingIndexBuffer(*device, physicalDevice);
+    std::shared_ptr<vk::UniqueDeviceMemory> stagingIndexBufMem = getStagingIndexBufferMemory(*device, physicalDevice, *stagingIndexBuf);
+    writeStagingIndexBuffer(*device, *stagingIndexBufMem);
+    sendIndexBuffer(*device, queueFamilyIndex, graphicsQueue, *stagingIndexBuf, *indexBuf);
+
+    int imgWidth, imgHeight, imgCh;
+    void* imgData = getImageData(&imgWidth, &imgHeight, &imgCh);
+    std::shared_ptr<vk::UniqueImage> texImage = getImage(*device, imgWidth, imgHeight, imgCh);
+    std::shared_ptr<vk::UniqueDeviceMemory> imgBufMemory = getImageMemory(*device, physicalDevice, *texImage);
+    std::shared_ptr<vk::UniqueBuffer> imgStagingBuf = getStagingImageBuffer(*device, imgWidth, imgHeight, imgCh);
+    std::shared_ptr<vk::UniqueDeviceMemory> imgStagingBufMemory = getStagingImageMemory(*device, physicalDevice, *imgStagingBuf);
+    writeImageBuffer(*device, *imgStagingBufMemory, imgData, imgWidth, imgHeight, imgCh);
+    sendImageBuffer(*device, queueFamilyIndex, graphicsQueue, *imgStagingBuf, *texImage, imgWidth, imgHeight);
+    std::shared_ptr<vk::UniqueSampler> texSampler = getSampler(*device);
+    std::shared_ptr<vk::UniqueImageView> texImageView = getImageView(*device, *texImage);
+    releaseImageData(imgData);
+
+    std::shared_ptr<vk::UniqueBuffer> uniformBuf = getUniformBuffer(*device);
+    std::shared_ptr<vk::UniqueDeviceMemory> uniformBufMem = getUniformBufferMemory(*device, physicalDevice, *uniformBuf);
+    void* pUniformBufMem = mapUniformBuffer(*device, *uniformBufMem);
+    std::shared_ptr<std::vector<vk::UniqueDescriptorSetLayout>> descSetLayouts = getDiscriptorSetLayouts(*device);
+    std::shared_ptr<std::vector<vk::DescriptorSetLayout>> unwrapedDescSetLayouts = unwrapHandles<vk::DescriptorSetLayout, vk::UniqueDescriptorSetLayout>(*descSetLayouts);
+    std::shared_ptr<vk::UniqueDescriptorPool> descPool = getDescriptorPool(*device);
+    std::shared_ptr<std::vector<vk::UniqueDescriptorSet>> descSets = getDescprotorSets(*device, *descPool, *unwrapedDescSetLayouts);
+    writeDescriptorSets(*device, *descSets, *uniformBuf, *texImageView, *texSampler);
+    std::shared_ptr<std::vector<vk::PushConstantRange>> pushConstantRanges = getPushConstantRanges();
+
+    std::shared_ptr<vk::UniquePipelineLayout> descpriptorPipelineLayout = getDescpriptorPipelineLayout(*device, *unwrapedDescSetLayouts, *pushConstantRanges);
+    std::shared_ptr<vk::SurfaceCapabilitiesKHR> surfaceCapabilities = getSurfaceCapabilities(physicalDevice, *surface);
+    std::shared_ptr<std::vector<vk::SurfaceFormatKHR>> surfaceFormats = getSurfaceFormats(physicalDevice, *surface);
+    std::shared_ptr<std::vector<vk::PresentModeKHR>> surfacePresentModes = getSurfacePresentModes(physicalDevice, *surface);
+    vk::SurfaceFormatKHR& surfaceFormat = (*surfaceFormats)[0];
+    vk::PresentModeKHR& surfacePresentMode = (*surfacePresentModes)[0];
+
+    std::shared_ptr<std::vector<vk::AttachmentReference>> subpass0_attachmentRefs = getAttachmentReferences();
+    std::shared_ptr<vk::AttachmentReference> subpass0_depthStencilAttachmentRef = getDepthStencilAttachmentReference();
+    std::shared_ptr<std::vector<vk::SubpassDescription>> subpasses = getSubpassDescription(*subpass0_attachmentRefs, *subpass0_depthStencilAttachmentRef);
+
+    std::shared_ptr<vk::UniqueRenderPass> renderPass = getRenderPass(*device, surfaceFormat, *subpasses);
+    std::shared_ptr<vk::UniquePipeline> pipeline = getPipeline(*device, *renderPass, *surfaceCapabilities, *vertexBindingDescription, *vertexInputDescription, *descpriptorPipelineLayout);
+
+    std::shared_ptr<vk::UniqueSwapchainKHR> swapchain;
+    std::shared_ptr<std::vector<vk::Image>> swapchainImages;
+    std::shared_ptr<std::vector<vk::UniqueImageView>> swapchainImageViews;
+    std::shared_ptr<vk::UniqueImage> depthImage;
+    std::shared_ptr<vk::UniqueDeviceMemory> depthImageMemory;
+    std::shared_ptr<vk::UniqueImageView> depthImageView;
+    std::shared_ptr<std::vector<vk::UniqueFramebuffer>> swapchainFramebufs;
+
+    auto recreateSwapchain = [&]()
+    {
+        if (swapchainFramebufs)
+        {
+            swapchainFramebufs->clear();
+        }
+        if (depthImageView)
+        {
+            depthImageView->reset();
+        }
+        if (depthImageMemory)
+        {
+            depthImageMemory->reset();
+        }
+        if (depthImage)
+        {
+            depthImage->reset();
+        }
+        if (swapchainImageViews)
+        {
+            swapchainImageViews->clear();
+        }
+        if (swapchainImages)
+        {
+            swapchainImages->clear();
+        }
+        if (swapchain)
+        {
+            swapchain->reset();
+        }
+
+        swapchain = getSwapchain(*device, physicalDevice, *surface, *surfaceCapabilities, surfaceFormat, surfacePresentMode);
+        swapchainImages = getSwapchainImages(*device, *swapchain);
+        swapchainImageViews = getSwapchainImageViews(*device, *swapchain, *swapchainImages, surfaceFormat);
+        depthImage = getDepthImage(*device, physicalDevice, *surfaceCapabilities);
+        depthImageMemory = getDepthImageMemory(*device, physicalDevice, *depthImage);
+        depthImageView = getDepthImageView(*device, *renderPass, *depthImage);
+        swapchainFramebufs = getFramebuffers(*device, *renderPass, *swapchainImageViews, *surfaceCapabilities, *depthImageView);
+    };
+
+    recreateSwapchain();
+
+    std::shared_ptr<vk::UniqueCommandPool> cmdPool = getCommandPool(*device, queueFamilyIndex);
+    std::shared_ptr<std::vector<vk::UniqueCommandBuffer>> cmdBufs = getCommandBuffer(*device, *cmdPool);
+
+    vk::SemaphoreCreateInfo semaphoreCreateInfo;
+
+    vk::UniqueSemaphore swapchainImgSemaphore = device->get().createSemaphoreUnique(semaphoreCreateInfo);
+    vk::UniqueSemaphore imgRenderedSemaphore = device->get().createSemaphoreUnique(semaphoreCreateInfo);
+
+    vk::FenceCreateInfo fenceCreateInfo;
+    fenceCreateInfo.flags = vk::FenceCreateFlagBits::eSignaled;
+    vk::UniqueFence imgRenderedFence = device->get().createFenceUnique(fenceCreateInfo);
+
+    int deltaTime = 0;
+    std::chrono::system_clock::time_point sT;
+
+    graphicsQueue.waitIdle();
 }
 
 void terminateVulkan() {
-    if (instance) {
-        if (surface) {
-            // destroySurfaceKHRもExtension関数
-            instance.destroySurfaceKHR(surface, nullptr, dldi);
-            LOG("Vulkanサーフェスを破棄しました。");
-        }
-        instance.destroy();
-        LOG("Vulkanインスタンスを破棄しました。");
-    }
-    surface = nullptr;
-    instance = nullptr;
+
 }
 
 void handle_cmd(android_app *pApp, int32_t cmd)
@@ -165,8 +270,6 @@ extern "C"
 {
 void android_main(struct android_app *pApp)
 {
-    LOG("android_main 起動");
-
     pApp->onAppCmd = handle_cmd;
     android_app_set_motion_event_filter(pApp, motion_event_filter_func);
 
@@ -182,7 +285,7 @@ void android_main(struct android_app *pApp)
                 pSource->process(pApp, pSource);
             }
         }
-        if (instance && surface)
+        // if (instance && surface)
         {
             // handle_input(pApp); // 入力処理
             // aApp->Process();    // 描画処理

@@ -66,19 +66,16 @@ std::shared_ptr<std::vector<const char*>> getAppleRequiredInstanceExtensions()
 std::shared_ptr<vk::UniqueInstance> getInstance(vk::ApplicationInfo& appInfo)
 {;
     std::shared_ptr<vk::UniqueInstance> result = std::make_shared<vk::UniqueInstance>();
-    LOG("getInstance");
 
 #if !defined(__ANDROID__)
     std::shared_ptr<std::vector<const char*>> instanceRequiredExtensions = getGlfwRequiredInstanceExtensions();
 #else
-    LOG("__ANDROID__");
 
     std::shared_ptr<std::vector<const char*>> instanceRequiredExtensions = std::make_shared<std::vector<const char*>>();
     instanceRequiredExtensions->push_back(VK_KHR_SURFACE_EXTENSION_NAME);
     instanceRequiredExtensions->push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
     // デバッグレポート
     //instanceRequiredExtensions->push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    LOG("デバッグレポート");
 #endif
 
 #ifdef __APPLE__
@@ -86,12 +83,9 @@ std::shared_ptr<vk::UniqueInstance> getInstance(vk::ApplicationInfo& appInfo)
     std::copy(appleRequiredInstanceExtensions->begin(), appleRequiredInstanceExtensions->end(), std::back_inserter(*instanceRequiredExtensions));
 #endif
 
-    LOG("shared_ptr");
     std::shared_ptr<vk::InstanceCreateInfo> instanceCreateInfo = getInstanceCreateInfo(appInfo, *instanceRequiredExtensions);
     debugInstanceCreateInfo(*instanceCreateInfo);
 
-    LOG("debugInstanceCreateInfo");
     *result = vk::createInstanceUnique(*instanceCreateInfo);
-    LOG("result");
     return result;
 }
