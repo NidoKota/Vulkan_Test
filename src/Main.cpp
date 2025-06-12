@@ -38,7 +38,12 @@ int main()
     std::shared_ptr<vk::UniqueSurfaceKHR> surface = getSurface(*instance, *window);
 
     std::shared_ptr<std::vector<vk::PhysicalDevice>> physicalDevices = getPhysicalDevices(*instance);
-    debugPhysicalDevices(*physicalDevices);
+    debugPhysicalDevices(*physicalDevices); 
+
+
+    std::shared_ptr<std::vector<const char*>> aaaa = {};
+    LOG("instanceRequiredExtensions");
+    aaaa->push_back(VK_KHR_SURFACE_EXTENSION_NAME);
 
     std::shared_ptr<std::pair<vk::PhysicalDevice, uint32_t>> physicalDeviceAndQueueFamilyIndex = selectPhysicalDeviceAndQueueFamilyIndex(*physicalDevices, *surface);
     vk::PhysicalDevice physicalDevice;

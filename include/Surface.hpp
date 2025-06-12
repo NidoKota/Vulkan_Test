@@ -3,7 +3,9 @@
 #include <iostream>
 #include <memory>
 #include <vulkan/vulkan.hpp>
+#if !defined(__ANDROID__)
 #include <GLFW/glfw3.h>
+#endif
 #include "Utility.hpp"
 #include "Debug.hpp"
 
@@ -17,6 +19,9 @@ using namespace Vulkan_Test;
 // これを通してVulkanはウィンドウや画面に描画できるようになる
 // 描画結果を実際に画面に表示するためには、vk::SurfaceKHR と互換性のあるスワップチェーン (vk::SwapchainKHR) を作成する必要がある
 // スワップチェーンは、描画に使用する複数のイメージ (通常はダブルバッファリングやトリプルバッファリング) を管理し、描画が終わったイメージをサーフェスに提示 (present) する役割を担う
+#if defined(__ANDROID__)
+
+#else
 std::shared_ptr<vk::UniqueSurfaceKHR> getSurface(vk::UniqueInstance& instance, GLFWwindow& window)
 {
     VkSurfaceKHR c_surface;
@@ -32,6 +37,7 @@ std::shared_ptr<vk::UniqueSurfaceKHR> getSurface(vk::UniqueInstance& instance, G
 
     return std::make_shared<vk::UniqueSurfaceKHR>(c_surface, *instance);
 }
+#endif
 
 // 「物理デバイスが対象のサーフェスを扱う能力」の情報を取得する
 std::shared_ptr<std::vector<vk::SurfaceFormatKHR>> getSurfaceFormats(vk::PhysicalDevice& physicalDevice, vk::UniqueSurfaceKHR& surface)

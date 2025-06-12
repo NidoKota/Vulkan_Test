@@ -3,7 +3,6 @@
 #include <iostream>
 #include <memory>
 #include <vulkan/vulkan.hpp>
-#include <GLFW/glfw3.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include "../include/stb/stb_image.h"
 #include "Utility.hpp"
