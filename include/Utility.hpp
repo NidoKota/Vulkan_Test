@@ -30,7 +30,7 @@ namespace Vulkan_Test
 #if defined(__ANDROID__)
         aout << str << std::endl;
 #else
-        cout << str << std::endl;
+        cout << str;
 #endif
     }
     
