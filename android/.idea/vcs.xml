@@ -3,9 +3,11 @@
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$/.." vcs="Git" />
     <mapping directory="$PROJECT_DIR$/app/Vulkan-Hpp" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/app/Vulkan-Hpp/Vulkan-Headers" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/app/Vulkan-Hpp/glfw" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/app/Vulkan-Hpp/glm" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/app/Vulkan-Hpp/glslang" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/app/Vulkan-Hpp/tinyxml2" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/../include/stb" vcs="Git" />
   </component>
 </project>

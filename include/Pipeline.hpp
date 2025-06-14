@@ -8,6 +8,11 @@
 #include "Utility.hpp"
 #include "Debug.hpp"
 
+#if defined(__ANDROID__)
+#include <android/asset_manager.h>
+#include <game-activity/native_app_glue/android_native_app_glue.h>
+#endif
+
 using namespace Vulkan_Test;
 
 std::shared_ptr<vk::UniquePipelineLayout> getDescpriptorPipelineLayout(vk::UniqueDevice& device, std::vector<vk::DescriptorSetLayout>& descSetLayouts, std::vector<vk::PushConstantRange>& pushConstantRanges)
@@ -24,13 +29,24 @@ std::shared_ptr<vk::UniquePipelineLayout> getDescpriptorPipelineLayout(vk::Uniqu
     return result;
 }
 
+#if defined(__ANDROID__)
 std::shared_ptr<vk::UniquePipeline> getPipeline(
-    vk::UniqueDevice& device, 
-    vk::UniqueRenderPass& renderpass, 
-    vk::SurfaceCapabilitiesKHR& surfaceCapabilities, 
-    std::vector<vk::VertexInputBindingDescription>& vertexBindingDescription, 
-    std::vector<vk::VertexInputAttributeDescription>& vertexInputDescription,
-    vk::UniquePipelineLayout& pipelineLayout)
+        android_app* pApp,
+        vk::UniqueDevice& device,
+        vk::UniqueRenderPass& renderpass,
+        vk::SurfaceCapabilitiesKHR& surfaceCapabilities,
+        std::vector<vk::VertexInputBindingDescription>& vertexBindingDescription,
+        std::vector<vk::VertexInputAttributeDescription>& vertexInputDescription,
+        vk::UniquePipelineLayout& pipelineLayout)
+#else
+std::shared_ptr<vk::UniquePipeline> getPipeline(
+        vk::UniqueDevice& device,
+        vk::UniqueRenderPass& renderpass,
+        vk::SurfaceCapabilitiesKHR& surfaceCapabilities,
+        std::vector<vk::VertexInputBindingDescription>& vertexBindingDescription,
+        std::vector<vk::VertexInputAttributeDescription>& vertexInputDescription,
+        vk::UniquePipelineLayout& pipelineLayout)
+#endif
 {
     std::shared_ptr<vk::UniquePipeline> result = std::make_shared<vk::UniquePipeline>();
 
@@ -120,11 +136,24 @@ std::shared_ptr<vk::UniquePipeline> getPipeline(
     vk::UniqueShaderModule vertShader;
     vk::UniqueShaderModule fragShader;
     {
+#if __ANDROID__
+        AAssetManager* assetManager = pApp->activity->assetManager;
+#endif
+
         // 頂点シェーダーを読み込む
+#if __ANDROID__
+        std::vector<char> vertSpvFileData;
+        AAsset* vertSpvFile = AAssetManager_open(assetManager, "shader.vert.spv", AASSET_MODE_BUFFER);
+        size_t vertSpvFileSz = AAsset_getLength(vertSpvFile);
+        vertSpvFileData.resize(vertSpvFileSz);
+        AAsset_read(vertSpvFile, vertSpvFileData.data(), vertSpvFileSz);
+        AAsset_close(vertSpvFile);
+#else
         size_t vertSpvFileSz = std::filesystem::file_size("../src/shader.vert.spv");
         std::ifstream vertSpvFile = std::ifstream("../src/shader.vert.spv", std::ios_base::binary);
         std::vector<char> vertSpvFileData = std::vector<char>(vertSpvFileSz);
         vertSpvFile.read(vertSpvFileData.data(), vertSpvFileSz);
+#endif
 
         vk::ShaderModuleCreateInfo vertShaderCreateInfo;
         vertShaderCreateInfo.codeSize = vertSpvFileSz;
@@ -132,10 +161,19 @@ std::shared_ptr<vk::UniquePipeline> getPipeline(
         vertShader = device.get().createShaderModuleUnique(vertShaderCreateInfo);
 
         // フラグメントシェーダーを読み込む
+#if __ANDROID__
+        std::vector<char> fragSpvFileData;
+        AAsset* fragSpvFile = AAssetManager_open(assetManager, "shader.frag.spv", AASSET_MODE_BUFFER);
+        size_t fragSpvFileSz = AAsset_getLength(fragSpvFile);
+        fragSpvFileData.resize(fragSpvFileSz);
+        AAsset_read(fragSpvFile, fragSpvFileData.data(), fragSpvFileSz);
+        AAsset_close(fragSpvFile);
+#else
         size_t fragSpvFileSz = std::filesystem::file_size("../src/shader.frag.spv");
         std::ifstream fragSpvFile = std::ifstream("../src/shader.frag.spv", std::ios_base::binary);
         std::vector<char> fragSpvFileData = std::vector<char>(fragSpvFileSz);
         fragSpvFile.read(fragSpvFileData.data(), fragSpvFileSz);
+#endif
 
         vk::ShaderModuleCreateInfo fragShaderCreateInfo;
         fragShaderCreateInfo.codeSize = fragSpvFileSz;

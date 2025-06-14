@@ -10,8 +10,8 @@ set(APPLICATION_SRC_DIR ${PROJECT_SOURCE_DIR}/../../../../../../Vulkan_Test)
 
 set(CMAKE_CXX_STANDARD 17)
 
-add_custom_target(vertexshader ALL COMMAND "glslc" "${PROJECT_SOURCE_DIR}/src/shader.vert" "-o" "${PROJECT_SOURCE_DIR}/src/shader.vert.spv")
-add_custom_target(fragmentshader ALL COMMAND "glslc" "${PROJECT_SOURCE_DIR}/src/shader.frag" "-o" "${PROJECT_SOURCE_DIR}/src/shader.frag.spv")
+add_custom_target(vertexshader ALL COMMAND "glslc" "${APPLICATION_SRC_DIR}/src/shader.vert" "-o" "${PROJECT_SOURCE_DIR}/app/src/main/assets/shader.vert.spv")
+add_custom_target(fragmentshader ALL COMMAND "glslc" "${APPLICATION_SRC_DIR}/src/shader.frag" "-o" "${PROJECT_SOURCE_DIR}/app/src/main/assets/shader.frag.spv")
 
 #file(GLOB SOURCES "${APPLICATION_SRC_DIR}/src/*.cpp")
 file(GLOB HEADERS "${APPLICATION_SRC_DIR}/include/*.hpp")

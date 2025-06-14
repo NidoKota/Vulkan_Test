@@ -1,6 +1,7 @@
 #include <iostream>
 #include <memory>
 #include <chrono>
+#include <functional>
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
 #include "../include/Utility.hpp"
@@ -39,11 +40,6 @@ int main()
 
     std::shared_ptr<std::vector<vk::PhysicalDevice>> physicalDevices = getPhysicalDevices(*instance);
     debugPhysicalDevices(*physicalDevices); 
-
-
-    std::shared_ptr<std::vector<const char*>> aaaa = {};
-    LOG("instanceRequiredExtensions");
-    aaaa->push_back(VK_KHR_SURFACE_EXTENSION_NAME);
 
     std::shared_ptr<std::pair<vk::PhysicalDevice, uint32_t>> physicalDeviceAndQueueFamilyIndex = selectPhysicalDeviceAndQueueFamilyIndex(*physicalDevices, *surface);
     vk::PhysicalDevice physicalDevice;
@@ -119,8 +115,8 @@ int main()
     std::shared_ptr<vk::UniqueDeviceMemory> depthImageMemory;
     std::shared_ptr<vk::UniqueImageView> depthImageView;
     std::shared_ptr<std::vector<vk::UniqueFramebuffer>> swapchainFramebufs;
-    
-    auto recreateSwapchain = [&]()
+
+    std::function recreateSwapchain = [&]()
     {
         if (swapchainFramebufs)
         {
