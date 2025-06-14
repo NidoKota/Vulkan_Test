@@ -3,7 +3,10 @@
 #include <iostream>
 #include <memory>
 #include <vulkan/vulkan.hpp>
+
+#if !defined(__ANDROID__)
 #include <GLFW/glfw3.h>
+#endif
 
 namespace Vulkan_Test
 {
@@ -32,6 +35,7 @@ namespace Vulkan_Test
         SET_LOG_INDEX(0);
     }
 
+#if !defined(__ANDROID__)
     void debugGlfwWindow(GLFWwindow &window)
     {
         LOG("----------------------------------------");
@@ -43,6 +47,7 @@ namespace Vulkan_Test
         glfwGetFramebufferSize(&window, &width, &height);
         LOG("FramebufferSize: width " << width << ", height " << height);
     }
+#endif
 
     // UUIDを16進数で表示する関数
     std::string getUUID(const uint8_t* uuid, size_t size)

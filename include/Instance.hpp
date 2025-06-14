@@ -3,7 +3,9 @@
 #include <iostream>
 #include <memory>
 #include <vulkan/vulkan.hpp>
+#if !defined(__ANDROID__)
 #include <GLFW/glfw3.h>
+#endif
 #include "Utility.hpp"
 #include "Debug.hpp"
 
@@ -34,6 +36,7 @@ std::shared_ptr<vk::InstanceCreateInfo> getInstanceCreateInfo(
     return instanceCreateInfo;
 }
 
+#if !defined(__ANDROID__)
 std::shared_ptr<std::vector<const char*>> getGlfwRequiredInstanceExtensions()
 {
     uint32_t glfwExtensionsCount;
@@ -44,6 +47,7 @@ std::shared_ptr<std::vector<const char*>> getGlfwRequiredInstanceExtensions()
 
     return result;
 }
+#endif
 
 #ifdef __APPLE__
 std::shared_ptr<std::vector<const char*>> getAppleRequiredInstanceExtensions()
@@ -60,10 +64,19 @@ std::shared_ptr<std::vector<const char*>> getAppleRequiredInstanceExtensions()
 // グローバルな操作の管理: Vulkan API 全体に関わる操作 (例えば、デバッグコールバックの設定など) を行う
 // 他の Vulkan オブジェクトの作成の基盤: vk::PhysicalDevice (物理デバイス)、vk::Device (論理デバイス)、vk::SurfaceKHR (サーフェス) などの他の主要な Vulkan オブジェクトは、vk::Instance を通して作成される
 std::shared_ptr<vk::UniqueInstance> getInstance(vk::ApplicationInfo& appInfo)
-{
+{;
     std::shared_ptr<vk::UniqueInstance> result = std::make_shared<vk::UniqueInstance>();
 
+#if !defined(__ANDROID__)
     std::shared_ptr<std::vector<const char*>> instanceRequiredExtensions = getGlfwRequiredInstanceExtensions();
+#else
+
+    std::shared_ptr<std::vector<const char*>> instanceRequiredExtensions = std::make_shared<std::vector<const char*>>();
+    instanceRequiredExtensions->push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+    instanceRequiredExtensions->push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
+    // デバッグレポート
+    //instanceRequiredExtensions->push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+#endif
 
 #ifdef __APPLE__
     std::shared_ptr<std::vector<const char*>> appleRequiredInstanceExtensions = getAppleRequiredInstanceExtensions();

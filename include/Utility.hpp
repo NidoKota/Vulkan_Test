@@ -15,6 +15,10 @@
 #include <algorithm>
 #include <iterator>
 
+#if defined(__ANDROID__)
+#include "AndroidOut.h"
+#endif
+
 namespace Vulkan_Test
 {
     using namespace std;
@@ -23,14 +27,22 @@ namespace Vulkan_Test
     inline void coutMultiThread(std::string str)
     {
         //lock_guard<mutex> lock(coutMutex);
-        cout << str;
+#if defined(__ANDROID__)
+        aout << str << std::endl;
+#else
+        cout << str << std::endl;
+#endif
     }
     
     //mutex coutMutex;
     inline void cerrMultiThread(std::string str)
     {
         //lock_guard<mutex> lock(coutMutex);
+#if defined(__ANDROID__)
+        aout << str << std::endl;
+#else
         cerr << str;
+#endif
     }
 
     inline string getTimeStamp()

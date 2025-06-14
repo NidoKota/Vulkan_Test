@@ -82,7 +82,7 @@ std::shared_ptr<std::pair<vk::PhysicalDevice, uint32_t>> selectPhysicalDeviceAnd
     // だいたい「インスタンスを介して物理デバイスを列挙する」→「それぞれの物理デバイスの情報を取得する」→「一番いいのを頼む」という流れになる
 
     std::shared_ptr<std::pair<vk::PhysicalDevice, uint32_t>> result;
-    
+
     // デバイスとキューの検索
     for (size_t i = 0; i < physicalDevices.size(); i++)
     {
